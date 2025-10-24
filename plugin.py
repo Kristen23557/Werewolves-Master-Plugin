@@ -454,6 +454,19 @@ class WerewolfCommand(BaseCommand):
             await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
             return False, "未知命令", True
 
+    @property
+    def plugin_instance(self):
+        """动态获取插件实例"""
+        from src.plugin_system.plugin_manager import get_plugin_instance
+        return get_plugin_instance("Werewolves-Master-Plugin")
+    
+    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+        """执行命令逻辑"""
+        # 现在可以直接使用 self.plugin_instance
+        matched_groups = self.matched_groups or {}
+        action = matched_groups.get("action", "").lower()
+        params = matched_groups.get("params", "")
+
     async def _handle_role_commands(self, params: str) -> Tuple[bool, str, bool]:
         """处理角色查询命令"""
         if params.strip().lower() == "list":

@@ -324,8 +324,12 @@ class ChaosPackDLC:
                 await send_api.text_to_user(text="❌ 不能连续两晚守护同一名玩家。", user_id=user_id, platform="qq")
                 return True
             
-            # 检查守护效果
-            can_guard = await self.modify_guard_protect(game_data, target_player)
+            # 检查守护效果 - 修复参数传递
+            can_guard = await self.modify_guard_protect(
+                game_data, 
+                True,  # default_value
+                target_player=target_player
+            )
             if not can_guard:
                 await send_api.text_to_user(text="❌ 无法守护该玩家。", user_id=user_id, platform="qq")
                 return True
@@ -625,6 +629,7 @@ class ChaosPackDLC:
             dead_role.get("alive") and
             dead_role.get("can_change_team")):
             
+            # 只在真正死亡前转换阵营（alive=True时）
             if reason == "wolf_kill":
                 dead_role["team"] = "werewolf"
                 dead_role["death_trigger"] = "converted"

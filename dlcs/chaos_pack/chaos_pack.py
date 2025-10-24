@@ -188,8 +188,12 @@ class ChaosPackDLC:
         
         return False
 
-    async def modify_seer_result(self, game_data: Dict, target_player: str, original_result: str) -> str:
+    async def modify_seer_result(self, game_data: Dict, original_result: str, **kwargs) -> str:
         """修改预言家查验结果"""
+        target_player = kwargs.get('target_player')
+        if not target_player:
+            return original_result
+            
         target_role = game_data["players"][target_player]
         dlc_data = game_data["dlc_data"]["chaos_pack"]
         
@@ -220,8 +224,12 @@ class ChaosPackDLC:
         
         return original_result
 
-    async def modify_wolf_kill(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_wolf_kill(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改狼人杀人效果"""
+        target_player = kwargs.get('target_player')
+        if not target_player:
+            return default_value
+            
         target_role = game_data["players"][target_player]
         dlc_data = game_data["dlc_data"]["chaos_pack"]
         
@@ -250,10 +258,14 @@ class ChaosPackDLC:
         if target_role.get("original_code") == "double_face":
             target_role["death_trigger"] = "wolf_kill"
         
-        return True
+        return default_value
 
-    async def modify_guard_protect(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_guard_protect(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改守卫守护效果"""
+        target_player = kwargs.get('target_player')
+        if not target_player:
+            return default_value
+            
         target_role = game_data["players"][target_player]
         
         # 通灵师无法被守护
@@ -261,10 +273,14 @@ class ChaosPackDLC:
             target_role.get("cannot_be_guarded")):
             return False
         
-        return True
+        return default_value
 
-    async def modify_witch_antidote(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_witch_antidote(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改女巫解药效果"""
+        target_player = kwargs.get('target_player')
+        if not target_player:
+            return default_value
+            
         target_role = game_data["players"][target_player]
         
         # 通灵师解药无效
@@ -272,10 +288,14 @@ class ChaosPackDLC:
             target_role.get("antidote_ineffective")):
             return False
         
-        return True
+        return default_value
 
-    async def modify_witch_poison(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_witch_poison(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改女巫毒药效果"""
+        target_player = kwargs.get('target_player')
+        if not target_player:
+            return default_value
+            
         target_role = game_data["players"][target_player]
         
         # 双面人毒药无效
@@ -283,7 +303,7 @@ class ChaosPackDLC:
             target_role.get("immune_to_poison")):
             return False
         
-        return True
+        return default_value
 
     # === 具体角色行动处理 ===
     

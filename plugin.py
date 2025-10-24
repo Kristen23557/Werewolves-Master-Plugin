@@ -107,35 +107,35 @@ class WerewolfDLC:
         """处理扩展包专属命令"""
         return False
     
-    async def modify_seer_result(self, game_data: Dict, target_player: str, original_result: str) -> str:
+    async def modify_seer_result(self, game_data: Dict, original_result: str, **kwargs) -> str:
         """修改预言家查验结果"""
         return original_result
     
-    async def modify_wolf_kill(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_wolf_kill(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改狼人杀人效果"""
-        return True
+        return default_value
     
-    async def modify_guard_protect(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_guard_protect(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改守卫守护效果"""
-        return True
+        return default_value
     
-    async def modify_witch_antidote(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_witch_antidote(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改女巫解药效果"""
-        return True
+        return default_value
     
-    async def modify_witch_poison(self, game_data: Dict, target_player: str) -> bool:
+    async def modify_witch_poison(self, game_data: Dict, default_value: bool, **kwargs) -> bool:
         """修改女巫毒药效果"""
-        return True
+        return default_value
 
 # --- 插件主类 ---
 @register_plugin
 class WerewolfGamePlugin(BasePlugin):
     """狼人杀游戏插件"""
 
-    plugin_name = "Werewolves-Master-Plugin"
+    plugin_name = "werewolf_game"
     plugin_description = "纯指令驱动的狼人杀游戏"
     plugin_version = "1.0.0"
-    plugin_author = "KArabella"
+    plugin_author = "Assistant"
     enable_plugin = True
 
     dependencies = []
@@ -416,6 +416,10 @@ class WerewolfCommand(BaseCommand):
         group_info = self.message.message_info.group_info
         group_id = str(group_info.group_id) if group_info else "private"
 
+        # 检查是否是角色查询命令
+        if action == "roles":
+            return await self._handle_role_commands(params)
+
         # 检查是否是游戏内行动命令
         if await self._handle_game_actions(user_id, group_id, action, params):
             return True, "游戏行动已处理", True
@@ -442,6 +446,72 @@ class WerewolfCommand(BaseCommand):
         else:
             await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
             return False, "未知命令", True
+
+    async def _handle_role_commands(self, params: str) -> Tuple[bool, str, bool]:
+        """处理角色查询命令"""
+        if params.strip().lower() == "list":
+            return await self._show_all_roles()
+        else:
+            await self.send_text("❌ 角色命令格式错误。使用: /wwg roles list")
+            return False, "角色命令格式错误", True
+
+    async def _show_all_roles(self) -> Tuple[bool, str, bool]:
+        """显示所有可用角色"""
+        plugin = self.plugin_instance
+        
+        # 基础角色
+        base_roles_msg = "🎭 **基础角色列表**\n\n"
+        for role_code, role_info in BASE_ROLES.items():
+            team_emoji = "🐺" if role_info["team"] == "werewolf" else "👨‍🌾"
+            base_roles_msg += f"{team_emoji} {role_info['name']} ({role_code})\n"
+            base_roles_msg += f"   阵营: {self._get_team_name(role_info['team'])}\n"
+            base_roles_msg += f"   类型: {'神民' if role_info.get('sub_role') else '普通'}\n"
+            if role_info.get('night_action'):
+                base_roles_msg += f"   夜晚行动: /wwg {role_info['action_command']}\n"
+            base_roles_msg += f"   描述: {role_info['description']}\n"
+            base_roles_msg += "   ---\n"
+        
+        await self.send_text(base_roles_msg)
+        
+        # 扩展包角色
+        if plugin.active_dlcs:
+            dlc_roles_msg = "🎮 **扩展包角色列表**\n\n"
+            for dlc_id, dlc in plugin.active_dlcs.items():
+                dlc_roles_msg += f"📦 {dlc.dlc_name} (ID: {dlc_id})\n"
+                for role_code, role_info in dlc.roles.items():
+                    team_emoji = self._get_role_team_emoji(role_info["team"])
+                    dlc_roles_msg += f"  {team_emoji} {role_info['name']} ({role_code})\n"
+                    dlc_roles_msg += f"     阵营: {self._get_team_name(role_info['team'])}\n"
+                    dlc_roles_msg += f"     类型: {'神民' if role_info.get('sub_role') else '普通'}\n"
+                    if role_info.get('night_action'):
+                        dlc_roles_msg += f"     夜晚行动: /wwg {role_info['action_command']}\n"
+                    dlc_roles_msg += f"     描述: {role_info['description'][:50]}...\n"
+                dlc_roles_msg += "  ---\n"
+            
+            await self.send_text(dlc_roles_msg)
+        
+        usage_msg = """
+💡 **使用说明**
+在房间设置中使用角色代号设置角色数量：
+/wwg settings roles [角色代号] [数量]
+
+例如：
+/wwg settings roles seer 1
+/wwg settings roles guard 1
+/wwg settings roles hidden_wolf 1
+"""
+        await self.send_text(usage_msg)
+        
+        return True, "已显示所有角色", True
+
+    def _get_role_team_emoji(self, team: str) -> str:
+        """获取角色阵营表情"""
+        team_emojis = {
+            "village": "👨‍🌾",
+            "werewolf": "🐺", 
+            "neutral": "🎭"
+        }
+        return team_emojis.get(team, "❓")
 
     async def _handle_game_actions(self, user_id: str, group_id: str, action: str, params: str) -> bool:
         """处理游戏内行动命令"""
@@ -894,7 +964,7 @@ class WerewolfCommand(BaseCommand):
                 await self._start_night(game_data)
 
     async def _resolve_night_actions(self, game_data: Dict):
-        """处理夜晚行动结果"""
+        """解析夜晚行动结果"""
         # 调用DLC夜晚开始钩子
         plugin = self.plugin_instance
         await plugin.call_dlc_hook("on_night_start", game_data)
@@ -1138,6 +1208,7 @@ class WerewolfCommand(BaseCommand):
 🔸 `/wwg archive [对局码]` - 查询对局记录
 🔸 `/wwg list` - 查看可用房间
 🔸 `/wwg dlc list` - 查看可用扩展包
+🔸 `/wwg roles list` - 查看所有可用角色代号
 
 **房间设置参数：**
 🔹 `players [6-18]` - 设置玩家数量
@@ -1307,7 +1378,7 @@ class WerewolfCommand(BaseCommand):
                                 break
                     
                     if not found:
-                        await self.send_text("❌ 未知角色代号。")
+                        await self.send_text("❌ 未知角色代号。使用 /wwg roles list 查看可用角色。")
                         return False, "未知角色", True
             except ValueError:
                 await self.send_text("❌ 角色数量必须是数字。")

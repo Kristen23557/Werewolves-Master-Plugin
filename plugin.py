@@ -420,6 +420,15 @@ class WerewolfCommand(BaseCommand):
         if action == "roles":
             return await self._handle_role_commands(params)
 
+        # 检查是否是DLC管理命令
+        if action == "dlc":
+            dlc_handled, result_msg, should_intercept = await self._handle_dlc_commands(user_id, None, params, "")
+            if dlc_handled:
+                return dlc_handled, result_msg, should_intercept
+            else:
+                await self.send_text("❌ 未知DLC命令。使用: /wwg dlc list")
+                return False, "未知DLC命令", True
+
         # 检查是否是游戏内行动命令
         if await self._handle_game_actions(user_id, group_id, action, params):
             return True, "游戏行动已处理", True
@@ -441,8 +450,6 @@ class WerewolfCommand(BaseCommand):
             return await self._show_archive(params)
         elif action == "list":
             return await self._list_rooms()
-        elif action == "dlc":
-            return await self._handle_dlc_commands(params)
         else:
             await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
             return False, "未知命令", True
@@ -528,7 +535,8 @@ class WerewolfCommand(BaseCommand):
             return False
 
         # 先尝试处理扩展包命令
-        if await self._handle_dlc_commands(user_id, game_data, action, params):
+        dlc_handled, _, _ = await self._handle_dlc_commands(user_id, game_data, action, params)
+        if dlc_handled:
             return True
 
         # 游戏行动命令处理
@@ -547,7 +555,7 @@ class WerewolfCommand(BaseCommand):
         
         return False
 
-    async def _handle_dlc_commands(self, user_id: str, game_data: Dict = None, action: str = None, params: str = None) -> bool:
+    async def _handle_dlc_commands(self, user_id: str, game_data: Dict = None, action: str = None, params: str = None) -> Tuple[bool, str, bool]:
         """处理扩展包命令"""
         if game_data is None:
             # DLC管理命令
@@ -555,7 +563,7 @@ class WerewolfCommand(BaseCommand):
                 plugin = self.plugin_instance
                 if not plugin.active_dlcs:
                     await self.send_text("❌ 没有可用的扩展包。")
-                    return True
+                    return True, "没有可用扩展包", True
                 
                 msg = "🎮 **可用扩展包列表**\n\n"
                 for dlc_id, dlc in plugin.active_dlcs.items():
@@ -566,8 +574,8 @@ class WerewolfCommand(BaseCommand):
                     msg += "   ---\n"
                 
                 await self.send_text(msg)
-                return True
-            return False
+                return True, "已显示扩展包列表", True
+            return False, "未知DLC命令", False
         
         # 游戏内DLC命令
         plugin = self.plugin_instance
@@ -578,9 +586,9 @@ class WerewolfCommand(BaseCommand):
                 dlc = plugin.active_dlcs[dlc_id]
                 handled = await dlc.handle_command(user_id, game_data, action, params)
                 if handled:
-                    return True
+                    return True, "DLC命令已处理", True
         
-        return False
+        return False, "未处理的DLC命令", False
 
     async def _handle_vote(self, user_id: str, game_data: Dict, params: str) -> bool:
         """处理投票"""

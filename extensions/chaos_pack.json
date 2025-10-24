@@ -1,0 +1,91 @@
+{
+    "name": "混乱者包",
+    "description": "包含隐狼、守卫、魔术师、双面人、通灵师、继承者、画皮、白狼王、丘比特等角色",
+    "enabled": true,
+    "roles": {
+        "HWOLF": {
+            "name": "隐狼",
+            "team": "wolf",
+            "night_action": false,
+            "day_action": false,
+            "description": "潜伏在好人中的狼。被预言家查验时显示为好人。不能自爆，不能参与狼人夜间的杀人。当其他所有狼人队友出局后，隐狼获得刀人能力。",
+            "commands": {}
+        },
+        "GUARD": {
+            "name": "守卫",
+            "team": "village",
+            "night_action": true,
+            "day_action": false,
+            "description": "每晚可以守护一名玩家（包括自己），使其免于狼人的袭击。不能连续两晚守护同一名玩家。",
+            "commands": {
+                "guard": "守护玩家"
+            }
+        },
+        "MAGI": {
+            "name": "魔术师",
+            "team": "village",
+            "night_action": true,
+            "day_action": false,
+            "description": "每晚可以选择交换两名玩家的号码牌，持续到下一个夜晚。当晚所有以他们为目标的技能效果都会被交换。",
+            "commands": {
+                "swap": "交换玩家号码牌"
+            }
+        },
+        "DUAL": {
+            "name": "双面人",
+            "team": "third",
+            "night_action": false,
+            "day_action": false,
+            "description": "游戏开始时无固定阵营。当成为狼人的击杀目标时，加入狼人阵营。当被投票放逐时，加入好人阵营。女巫的毒药对他无效。",
+            "commands": {}
+        },
+        "PSYC": {
+            "name": "通灵师",
+            "team": "village",
+            "night_action": true,
+            "day_action": false,
+            "description": "每晚可以查验一名玩家的具体身份。代价：通灵师无法被守卫守护，且女巫的解药对其无效。",
+            "commands": {
+                "check": "查验具体身份"
+            }
+        },
+        "INHE": {
+            "name": "继承者",
+            "team": "village",
+            "night_action": false,
+            "day_action": false,
+            "description": "当相邻的玩家有神民出局时，继承者会秘密获得该神民的技能，并晋升为神民。",
+            "commands": {}
+        },
+        "PAINT": {
+            "name": "画皮",
+            "team": "wolf",
+            "night_action": true,
+            "day_action": false,
+            "description": "游戏第二夜起，可以潜入一名已出局玩家的身份，之后被预言家查验时，会显示为该已出局玩家的具体身份。每局限一次。",
+            "commands": {
+                "paint": "伪装身份"
+            }
+        },
+        "WWOLF": {
+            "name": "白狼王",
+            "team": "wolf",
+            "night_action": false,
+            "day_action": true,
+            "description": "白天投票放逐阶段，可以随时翻牌自爆，并带走一名玩家。此行动会立即终止当天发言并进入黑夜。",
+            "commands": {
+                "explode": "自爆并带走玩家"
+            }
+        },
+        "CUPID": {
+            "name": "丘比特",
+            "team": "third",
+            "night_action": true,
+            "day_action": false,
+            "description": "游戏第一晚，选择两名玩家成为情侣。丘比特与情侣形成第三方阵营。情侣中若有一方死亡，另一方会立即殉情。",
+            "commands": {
+                "connect": "连接情侣"
+            }
+        }
+    }
+}

@@ -3,8 +3,9 @@ import json
 import time
 import random
 import asyncio
+import logging
 from typing import List, Tuple, Type, Dict, Any, Optional, Set
-from datetime import datetime, timedelta
+from datetime import datetime
 from src.plugin_system import (
     BasePlugin,
     register_plugin,
@@ -12,13 +13,15 @@ from src.plugin_system import (
     ComponentInfo,
     ConfigField,
 )
-from src.plugin_system.apis import send_api, utils_api
 
 # ================= 全局状态 =================
 active_games: Dict[str, Dict] = {}
 player_profiles: Dict[str, Dict] = {}
 game_archives: Dict[str, Dict] = {}
 loaded_extensions: Dict[str, Dict] = {}
+
+# 创建日志器
+logger = logging.getLogger("WerewolfGame")
 
 # ================= 基础角色定义 =================
 BASE_ROLES = {
@@ -48,13 +51,57 @@ BASE_ROLES = {
     }
 }
 
-# ================= 核心管理器类 =================
+# ================= 扩展角色定义 =================
+EXTENSION_ROLES = {
+    "HWOLF": {
+        "name": "隐狼", "team": "wolf", "night_action": False, "day_action": False,
+        "description": "潜伏在好人中的狼。被预言家查验时显示为好人。不能自爆，不能参与狼人夜间的杀人。当其他所有狼人队友出局后，隐狼获得刀人能力。"
+    },
+    "GUARD": {
+        "name": "守卫", "team": "village", "night_action": True, "day_action": False,
+        "description": "每晚可以守护一名玩家（包括自己），使其免于狼人的袭击。不能连续两晚守护同一名玩家。",
+        "commands": {"guard": "守护玩家"}
+    },
+    "MAGI": {
+        "name": "魔术师", "team": "village", "night_action": True, "day_action": False,
+        "description": "每晚可以选择交换两名玩家的号码牌，持续到下一个夜晚。当晚所有以他们为目标的技能效果都会被交换。",
+        "commands": {"swap": "交换玩家号码牌"}
+    },
+    "DUAL": {
+        "name": "双面人", "team": "third", "night_action": False, "day_action": False,
+        "description": "游戏开始时无固定阵营。当成为狼人的击杀目标时，加入狼人阵营。当被投票放逐时，加入好人阵营。女巫的毒药对他无效。"
+    },
+    "PSYC": {
+        "name": "通灵师", "team": "village", "night_action": True, "day_action": False,
+        "description": "每晚可以查验一名玩家的具体身份。代价：通灵师无法被守卫守护，且女巫的解药对其无效。",
+        "commands": {"check": "查验具体身份"}
+    },
+    "INHE": {
+        "name": "继承者", "team": "village", "night_action": False, "day_action": False,
+        "description": "当相邻的玩家有神民出局时，继承者会秘密获得该神民的技能，并晋升为神民。"
+    },
+    "PAINT": {
+        "name": "画皮", "team": "wolf", "night_action": True, "day_action": False,
+        "description": "游戏第二夜起，可以潜入一名已出局玩家的身份，之后被预言家查验时，会显示为该已出局玩家的具体身份。每局限一次。",
+        "commands": {"paint": "伪装身份"}
+    },
+    "WWOLF": {
+        "name": "白狼王", "team": "wolf", "night_action": False, "day_action": True,
+        "description": "白天投票放逐阶段，可以随时翻牌自爆，并带走一名玩家。此行动会立即终止当天发言并进入黑夜。",
+        "commands": {"explode": "自爆并带走玩家"}
+    },
+    "CUPID": {
+        "name": "丘比特", "team": "third", "night_action": True, "day_action": False,
+        "description": "游戏第一晚，选择两名玩家成为情侣。丘比特与情侣形成第三方阵营。情侣中若有一方死亡，另一方会立即殉情。",
+        "commands": {"connect": "连接情侣"}
+    }
+}
+
 class GameManager:
     """游戏管理器"""
     
     def __init__(self, plugin):
         self.plugin = plugin
-        self.logger = plugin.logger
         self._ensure_directories()
         self._load_profiles()
         self._load_archives()
@@ -62,14 +109,14 @@ class GameManager:
     
     def _ensure_directories(self):
         """确保必要的目录存在"""
-        os.makedirs("games/finished", exist_ok=True)
-        os.makedirs("users", exist_ok=True)
-        os.makedirs("extensions", exist_ok=True)
+        os.makedirs("plugins/Werewolves-Master-Plugin/games/finished", exist_ok=True)
+        os.makedirs("plugins/Werewolves-Master-Plugin/users", exist_ok=True)
+        os.makedirs("plugins/Werewolves-Master-Plugin/extensions", exist_ok=True)
     
     def _load_profiles(self):
         """加载玩家档案"""
         global player_profiles
-        profile_dir = "users"
+        profile_dir = "plugins/Werewolves-Master-Plugin/users"
         if os.path.exists(profile_dir):
             for filename in os.listdir(profile_dir):
                 if filename.endswith(".json"):
@@ -78,12 +125,12 @@ class GameManager:
                         with open(os.path.join(profile_dir, filename), 'r', encoding='utf-8') as f:
                             player_profiles[qq] = json.load(f)
                     except Exception as e:
-                        self.logger.error(f"加载玩家档案 {filename} 失败: {e}")
+                        logger.error(f"加载玩家档案 {filename} 失败: {e}")
     
     def _load_archives(self):
         """加载游戏存档"""
         global game_archives
-        archive_dir = "games/finished"
+        archive_dir = "plugins/Werewolves-Master-Plugin/games/finished"
         if os.path.exists(archive_dir):
             for filename in os.listdir(archive_dir):
                 if filename.endswith(".json"):
@@ -92,12 +139,12 @@ class GameManager:
                         with open(os.path.join(archive_dir, filename), 'r', encoding='utf-8') as f:
                             game_archives[archive_code] = json.load(f)
                     except Exception as e:
-                        self.logger.error(f"加载存档 {filename} 失败: {e}")
+                        logger.error(f"加载存档 {filename} 失败: {e}")
     
     def _load_extensions(self):
         """加载扩展包"""
         global loaded_extensions
-        ext_dir = "extensions"
+        ext_dir = "plugins/Werewolves-Master-Plugin/extensions"
         if os.path.exists(ext_dir):
             for filename in os.listdir(ext_dir):
                 if filename.endswith(".json"):
@@ -106,9 +153,30 @@ class GameManager:
                         with open(os.path.join(ext_dir, filename), 'r', encoding='utf-8') as f:
                             extension = json.load(f)
                             loaded_extensions[ext_id] = extension
-                            self.logger.info(f"加载扩展包: {extension.get('name', ext_id)}")
+                            logger.info(f"加载扩展包: {extension.get('name', ext_id)}")
                     except Exception as e:
-                        self.logger.error(f"加载扩展包 {filename} 失败: {e}")
+                        logger.error(f"加载扩展包 {filename} 失败: {e}")
+        else:
+            # 创建默认的混乱者扩展包
+            self._create_default_extension()
+    
+    def _create_default_extension(self):
+        """创建默认扩展包"""
+        default_extension = {
+            "name": "混乱者包",
+            "description": "包含隐狼、守卫、魔术师、双面人、通灵师、继承者、画皮、白狼王、丘比特等角色",
+            "enabled": True,
+            "roles": EXTENSION_ROLES
+        }
+        
+        ext_dir = "plugins/Werewolves-Master-Plugin/extensions"
+        os.makedirs(ext_dir, exist_ok=True)
+        
+        with open(os.path.join(ext_dir, "chaos_pack.json"), 'w', encoding='utf-8') as f:
+            json.dump(default_extension, f, ensure_ascii=False, indent=2)
+        
+        loaded_extensions["chaos_pack"] = default_extension
+        logger.info("创建默认扩展包: 混乱者包")
     
     def get_all_roles(self) -> Dict[str, Dict]:
         """获取所有角色（基础+扩展）"""
@@ -126,15 +194,18 @@ class GameManager:
         
         result += "🏰 **基础角色**:\n"
         for code, role in BASE_ROLES.items():
-            result += f"🔸 {code} - {role['name']} ({self._get_team_name(role['team'])})\n"
+            team_name = self._get_team_name(role['team'])
+            result += f"🔸 {code} - {role['name']} ({team_name})\n"
         
         # 添加扩展角色
         for ext_id, extension in loaded_extensions.items():
             if extension.get('enabled', True) and extension.get('roles'):
                 result += f"\n🎁 **{extension.get('name', ext_id)}**:\n"
                 for code, role in extension['roles'].items():
-                    result += f"🔹 {code} - {role['name']} ({self._get_team_name(role['team'])})\n"
+                    team_name = self._get_team_name(role['team'])
+                    result += f"🔹 {code} - {role['name']} ({team_name})\n"
         
+        result += "\n💡 使用 `/wwg settings roles <角色代码> <数量>` 设置角色"
         return result
     
     def _get_team_name(self, team: str) -> str:
@@ -147,7 +218,7 @@ class GameManager:
     
     def save_game_file(self, room_id: str, game_data: Dict):
         """保存游戏文件"""
-        file_path = f"games/{room_id}.json"
+        file_path = f"plugins/Werewolves-Master-Plugin/games/{room_id}.json"
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(game_data, f, ensure_ascii=False, indent=2)
     
@@ -167,19 +238,44 @@ class GameManager:
                 return room_id
         return None
 
+class MessageSender:
+    """消息发送器"""
+    
+    @staticmethod
+    async def send_private_message(qq: str, message: str):
+        """发送私聊消息"""
+        try:
+            # 这里需要根据实际框架API进行调整
+            # 假设框架提供了消息发送功能
+            from src.plugin_system.apis import send_api
+            success = await send_api.text_to_user(text=message, user_id=qq, platform="qq")
+            if not success:
+                logger.warning(f"向 {qq} 发送消息可能失败")
+        except Exception as e:
+            logger.error(f"发送私聊消息失败 {qq}: {e}")
+    
+    @staticmethod
+    async def send_group_message(group_id: str, message: str):
+        """发送群聊消息"""
+        try:
+            from src.plugin_system.apis import send_api
+            success = await send_api.text_to_group(text=message, group_id=group_id, platform="qq")
+            if not success:
+                logger.warning(f"向群 {group_id} 发送消息可能失败")
+        except Exception as e:
+            logger.error(f"发送群消息失败 {group_id}: {e}")
+
 class ActionResolver:
     """行动解析器"""
     
     def __init__(self, game_manager):
         self.gm = game_manager
-        self.logger = game_manager.logger
     
     async def resolve_night_actions(self, game_data: Dict, room_id: str):
         """处理夜晚行动结果"""
         night_actions = game_data.get('night_actions', {})
-        all_roles = self.gm.get_all_roles()
         
-        # 处理各种行动
+        # 处理各种行动（按优先级顺序）
         await self._resolve_magician_swap(game_data, night_actions)
         kill_target = await self._resolve_wolf_kill(game_data, night_actions)
         heal_target, poison_target = await self._resolve_witch_actions(game_data, night_actions, kill_target)
@@ -200,10 +296,16 @@ class ActionResolver:
         # 处理继承者技能获取
         await self._resolve_inheritor_skills(game_data)
         
+        # 更新隐狼状态
+        await self._update_hidden_wolf_status(game_data)
+        
         # 清理行动记录
         game_data['night_actions'] = {}
         if guard_target:
             game_data['last_guard_target'] = guard_target
+        
+        # 保存游戏状态
+        self.gm.save_game_file(room_id, game_data)
     
     async def _resolve_magician_swap(self, game_data: Dict, night_actions: Dict):
         """处理魔术师交换"""
@@ -212,14 +314,13 @@ class ActionResolver:
         if magician_action:
             player1 = magician_action.get('target1')
             player2 = magician_action.get('target2')
-            if player1 and player2:
+            if player1 and player2 and player1 != player2:
                 game_data['magician_swap'] = (player1, player2)
-                # 通知魔术师
                 magician_qq = magician_action.get('player_qq')
                 if magician_qq:
-                    await send_api.text_to_user(
-                        text=f"✅ 已交换玩家 {player1} 和 {player2} 的号码牌",
-                        user_id=magician_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        magician_qq, 
+                        f"✅ 已交换玩家 {player1} 和 {player2} 的号码牌"
                     )
     
     async def _resolve_wolf_kill(self, game_data: Dict, night_actions: Dict) -> Optional[int]:
@@ -261,28 +362,29 @@ class ActionResolver:
         if witch_action:
             action_type = witch_action.get('action')
             target = witch_action.get('target')
+            witch_qq = witch_action.get('player_qq')
             
             if action_type == 'heal' and target and game_data.get('witch_heal_available', True):
                 heal_target = target
                 game_data['witch_heal_available'] = False
-                # 通知女巫
-                witch_qq = witch_action.get('player_qq')
                 if witch_qq:
-                    await send_api.text_to_user(
-                        text=f"✅ 已对玩家 {target} 使用解药",
-                        user_id=witch_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        witch_qq, 
+                        f"✅ 已对玩家 {target} 使用解药"
                     )
             
             elif action_type == 'poison' and target and game_data.get('witch_poison_available', True):
                 poison_target = target
                 game_data['witch_poison_available'] = False
-                # 通知女巫
-                witch_qq = witch_action.get('player_qq')
                 if witch_qq:
-                    await send_api.text_to_user(
-                        text=f"✅ 已对玩家 {target} 使用毒药", 
-                        user_id=witch_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        witch_qq, 
+                        f"✅ 已对玩家 {target} 使用毒药"
                     )
+            
+            elif action_type == 'skip':
+                if witch_qq:
+                    await MessageSender.send_private_message(witch_qq, "✅ 已跳过行动")
         
         return heal_target, poison_target
     
@@ -293,24 +395,21 @@ class ActionResolver:
         
         if guard_action and guard_action.get('action') == 'guard':
             target = guard_action.get('target')
+            guard_qq = guard_action.get('player_qq')
             last_guard = game_data.get('last_guard_target')
             
             if target != last_guard:
-                # 通知守卫
-                guard_qq = guard_action.get('player_qq')
                 if guard_qq:
-                    await send_api.text_to_user(
-                        text=f"✅ 已守护玩家 {target}",
-                        user_id=guard_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        guard_qq, 
+                        f"✅ 已守护玩家 {target}"
                     )
                 return target
             else:
-                # 通知不能连续守护
-                guard_qq = guard_action.get('player_qq')
                 if guard_qq:
-                    await send_api.text_to_user(
-                        text="❌ 不能连续两晚守护同一名玩家",
-                        user_id=guard_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        guard_qq, 
+                        "❌ 不能连续两晚守护同一名玩家"
                     )
         
         return None
@@ -343,7 +442,7 @@ class ActionResolver:
                         display_team = self.gm.get_all_roles()[display_role]['team']
                     
                     result_msg = f"玩家 {target_num} 的阵营是: {self._get_team_name(display_team)}"
-                    await send_api.text_to_user(text=result_msg, user_id=seer_qq, platform="qq")
+                    await MessageSender.send_private_message(seer_qq, result_msg)
     
     async def _resolve_psychic_check(self, game_data: Dict, night_actions: Dict):
         """处理通灵师查验"""
@@ -365,7 +464,7 @@ class ActionResolver:
                     
                     role_name = self.gm.get_all_roles()[actual_role]['name']
                     result_msg = f"玩家 {target_num} 的身份是: {role_name}"
-                    await send_api.text_to_user(text=result_msg, user_id=psychic_qq, platform="qq")
+                    await MessageSender.send_private_message(psychic_qq, result_msg)
     
     async def _resolve_paint_action(self, game_data: Dict, night_actions: Dict):
         """处理画皮伪装"""
@@ -383,9 +482,10 @@ class ActionResolver:
                         'painter_qq': paint_qq,
                         'disguised_role': target_player['role']
                     }
-                    await send_api.text_to_user(
-                        text=f"✅ 已伪装成玩家 {target_num} 的身份: {self.gm.get_all_roles()[target_player['role']]['name']}",
-                        user_id=paint_qq, platform="qq"
+                    role_name = self.gm.get_all_roles()[target_player['role']]['name']
+                    await MessageSender.send_private_message(
+                        paint_qq, 
+                        f"✅ 已伪装成玩家 {target_num} 的身份: {role_name}"
                     )
     
     async def _resolve_cupid_action(self, game_data: Dict, night_actions: Dict):
@@ -408,12 +508,12 @@ class ActionResolver:
                     
                     # 通知情侣
                     lover_msg = "💕 你被丘比特选中成为情侣！如果情侣死亡，你也会殉情。"
-                    await send_api.text_to_user(text=lover_msg, user_id=player1['qq'], platform="qq")
-                    await send_api.text_to_user(text=lover_msg, user_id=player2['qq'], platform="qq")
+                    await MessageSender.send_private_message(player1['qq'], lover_msg)
+                    await MessageSender.send_private_message(player2['qq'], lover_msg)
                     
-                    await send_api.text_to_user(
-                        text=f"✅ 已连接玩家 {target1} 和 {target2} 成为情侣",
-                        user_id=cupid_qq, platform="qq"
+                    await MessageSender.send_private_message(
+                        cupid_qq, 
+                        f"✅ 已连接玩家 {target1} 和 {target2} 成为情侣"
                     )
     
     async def _calculate_final_deaths(self, game_data: Dict, kill_target: Optional[int], 
@@ -439,6 +539,7 @@ class ActionResolver:
             poisoned_player = self._get_player_by_number(game_data, poison_target)
             if poisoned_player and poisoned_player['role'] != 'DUAL':
                 deaths.add(poison_target)
+                poisoned_player['death_reason'] = 'poisoned'
         
         # 处理情侣殉情
         lovers = game_data.get('lovers', [])
@@ -468,10 +569,16 @@ class ActionResolver:
                 # 检查猎人技能（非毒杀）
                 if player['role'] == 'HUNT' and player.get('death_reason') != 'poisoned':
                     game_data['hunter_revenge'] = player['qq']
+                    await MessageSender.send_private_message(
+                        player['qq'], 
+                        "🔫 你已死亡，可以使用 `/wwg shoot <玩家号>` 开枪复仇"
+                    )
                 
                 death_reason = player.get('death_reason', 'killed')
                 if death_reason == 'lover_suicide':
                     death_messages.append(f"玩家 {death_num} 殉情死亡")
+                elif death_reason == 'poisoned':
+                    death_messages.append(f"玩家 {death_num} 被毒杀")
                 else:
                     death_messages.append(f"玩家 {death_num} 死亡")
         
@@ -499,13 +606,29 @@ class ActionResolver:
                     player['inherited'] = True
                     
                     skill_msg = f"🎁 你继承了玩家 {first_dead['number']} 的 {self.gm.get_all_roles()[first_dead['role']]['name']} 技能"
-                    await send_api.text_to_user(text=skill_msg, user_id=player['qq'], platform="qq")
+                    await MessageSender.send_private_message(player['qq'], skill_msg)
+    
+    async def _update_hidden_wolf_status(self, game_data: Dict):
+        """更新隐狼状态"""
+        # 检查是否还有其他狼人存活
+        alive_wolves = [p for p in game_data['players'] 
+                       if p['alive'] and p['role'] != 'HWOLF' and self._is_wolf_role(p['role'])]
+        
+        for player in game_data['players']:
+            if player['role'] == 'HWOLF' and player['alive']:
+                if not alive_wolves and not player.get('can_kill', False):
+                    # 其他狼人都死了，隐狼获得刀人能力
+                    player['can_kill'] = True
+                    await MessageSender.send_private_message(
+                        player['qq'], 
+                        "🐺 所有狼人队友已出局，你获得了刀人能力！"
+                    )
     
     async def _notify_team_change(self, game_data: Dict, player: Dict, new_team: str):
         """通知阵营变化"""
         team_name = self._get_team_name(new_team)
         msg = f"🔄 你的阵营已转变为: {team_name}"
-        await send_api.text_to_user(text=msg, user_id=player['qq'], platform="qq")
+        await MessageSender.send_private_message(player['qq'], msg)
     
     def _is_wolf_role(self, role: str) -> bool:
         """检查是否为狼人阵营角色"""
@@ -532,10 +655,7 @@ class ActionResolver:
     async def _broadcast_to_players(self, game_data: Dict, message: str):
         """向所有玩家广播消息"""
         for player in game_data['players']:
-            try:
-                await send_api.text_to_user(text=message, user_id=player['qq'], platform="qq")
-            except Exception as e:
-                self.logger.error(f"向玩家 {player['qq']} 发送消息失败: {e}")
+            await MessageSender.send_private_message(player['qq'], message)
 
 class GamePhaseManager:
     """游戏阶段管理器"""
@@ -543,7 +663,6 @@ class GamePhaseManager:
     def __init__(self, game_manager, action_resolver):
         self.gm = game_manager
         self.resolver = action_resolver
-        self.logger = game_manager.logger
     
     async def start_game(self, game_data: Dict, room_id: str):
         """开始游戏"""
@@ -563,6 +682,17 @@ class GamePhaseManager:
             if role_code in all_roles:
                 role_list.extend([role_code] * count)
         
+        # 检查角色数量是否匹配
+        if len(role_list) != len(players):
+            # 自动调整角色数量
+            needed_roles = len(players) - len(role_list)
+            if needed_roles > 0:
+                # 添加村民
+                role_list.extend(['VILL'] * needed_roles)
+            else:
+                # 移除多余角色
+                role_list = role_list[:len(players)]
+        
         # 随机分配
         random.shuffle(players)
         random.shuffle(role_list)
@@ -577,6 +707,10 @@ class GamePhaseManager:
         game_data['witch_heal_available'] = True
         game_data['witch_poison_available'] = True
         game_data['night_actions'] = {}
+        game_data['night_count'] = 0
+        game_data['game_started'] = True
+        
+        self.gm.save_game_file(room_id, game_data)
     
     async def _notify_players(self, game_data: Dict):
         """通知所有玩家他们的角色"""
@@ -617,8 +751,25 @@ class GamePhaseManager:
                     message += "\n💥 白天使用 `/wwg explode <玩家号>` 自爆并带走玩家"
                 elif role_code == "CUPID":
                     message += "\n💕 第一夜使用 `/wwg connect <玩家号1> <玩家号2>` 连接情侣"
+                elif role_code == "HWOLF":
+                    message += "\n🐺 隐狼：被查验显示为好人，其他狼人出局后获得刀人能力"
+                elif role_code == "DUAL":
+                    message += "\n🔄 双面人：被狼杀加入狼人，被投票加入好人，免疫毒药"
+                elif role_code == "INHE":
+                    message += "\n🎁 继承者：相邻神民死亡时继承其技能"
                 
-                await send_api.text_to_user(text=message, user_id=player['qq'], platform="qq")
+                message += "\n\n💡 使用 `/wwg skip` 跳过夜晚行动"
+                
+                await MessageSender.send_private_message(player['qq'], message)
+        
+        # 通知所有玩家游戏开始
+        start_msg = (
+            f"🎮 **游戏开始！**\n\n"
+            f"👥 玩家总数: {len(game_data['players'])}\n"
+            f"🌙 第一夜开始，请有能力的玩家行动\n"
+            f"⏰ 行动时间: {self.gm.plugin.get_config('game.default_night_time', 300)//60} 分钟"
+        )
+        await self.resolver._broadcast_to_players(game_data, start_msg)
     
     async def _start_night_phase(self, game_data: Dict, room_id: str):
         """开始夜晚流程"""
@@ -693,10 +844,13 @@ class GamePhaseManager:
     async def _resolve_voting(self, game_data: Dict, room_id: str):
         """处理投票结果"""
         votes = {}
+        voted_players = []
+        
         for player in game_data['players']:
             if player['alive'] and player['vote']:
                 vote_target = player['vote']
                 votes[vote_target] = votes.get(vote_target, 0) + 1
+                voted_players.append(player['number'])
         
         if votes:
             max_votes = max(votes.values())
@@ -723,7 +877,11 @@ class GamePhaseManager:
             
             else:
                 # 平票，无人死亡
-                await self.resolver._broadcast_to_players(game_data, "⚖️ 投票平票，无人被处决")
+                tied_players = ", ".join(map(str, candidates))
+                await self.resolver._broadcast_to_players(
+                    game_data, 
+                    f"⚖️ 投票平票 ({tied_players})，无人被处决"
+                )
         
         else:
             await self.resolver._broadcast_to_players(game_data, "⚖️ 无人投票，无人被处决")
@@ -731,11 +889,18 @@ class GamePhaseManager:
         # 重置所有玩家的投票
         for player in game_data['players']:
             player['vote'] = None
+        
+        self.gm.save_game_file(room_id, game_data)
     
     async def _check_game_end(self, game_data: Dict, room_id: str) -> bool:
         """检查游戏是否结束"""
         alive_players = [p for p in game_data['players'] if p['alive']]
         all_roles = self.gm.get_all_roles()
+        
+        if len(alive_players) == 0:
+            # 无人存活，平局
+            await self._end_game(game_data, room_id, 'draw')
+            return True
         
         # 统计各阵营存活人数
         village_count = 0
@@ -766,7 +931,7 @@ class GamePhaseManager:
         
         # 检查基础胜利条件
         winner = None
-        if wolf_count == 0:
+        if wolf_count == 0 and third_count == 0:
             winner = 'village'
         elif wolf_count >= village_count + third_count:
             winner = 'wolf'
@@ -788,7 +953,7 @@ class GamePhaseManager:
         game_archives[archive_code] = game_data.copy()
         
         # 保存到完成的对局文件夹
-        archive_path = f"games/finished/{archive_code}.json"
+        archive_path = f"plugins/Werewolves-Master-Plugin/games/finished/{archive_code}.json"
         with open(archive_path, 'w', encoding='utf-8') as f:
             json.dump(game_data, f, ensure_ascii=False, indent=2)
         
@@ -807,7 +972,7 @@ class GamePhaseManager:
         all_roles = self.gm.get_all_roles()
         for player in game_data['players']:
             role_name = all_roles[player['role']]['name']
-            status = "存活" if player['alive'] else "死亡"
+            status = "✅ 存活" if player['alive'] else "❌ 死亡"
             death_reason = f" ({player.get('death_reason')})" if not player['alive'] else ""
             result_msg += f"玩家 {player['number']}: {role_name} - {status}{death_reason}\n"
         
@@ -818,7 +983,7 @@ class GamePhaseManager:
             del active_games[room_id]
         
         # 删除临时游戏文件
-        temp_file = f"games/{room_id}.json"
+        temp_file = f"plugins/Werewolves-Master-Plugin/games/{room_id}.json"
         if os.path.exists(temp_file):
             os.remove(temp_file)
     
@@ -841,22 +1006,47 @@ class GamePhaseManager:
             profile = player_profiles[qq]
             profile['games_played'] += 1
             
-            player_team = all_roles[player['role']]['team']
-            if (player_team == winner or 
-                (winner == 'lovers' and player['qq'] in [game_data.get('cupid')] + 
-                 [self.resolver._get_player_by_number(game_data, l)['qq'] for l in game_data.get('lovers', [])])):
+            # 判断胜负
+            is_winner = False
+            if winner == 'draw':
+                # 平局不计胜负
+                pass
+            elif winner == 'lovers':
+                # 情侣阵营胜利
+                is_winner = (player['qq'] == game_data.get('cupid') or 
+                           any(player['number'] == l for l in game_data.get('lovers', [])))
+            else:
+                # 基础阵营胜利
+                player_team = all_roles[player['role']]['team']
+                is_winner = (player_team == winner)
+            
+            if is_winner:
                 profile['games_won'] += 1
                 profile['recent_win_rate'].append(1)
             else:
                 profile['games_lost'] += 1
                 profile['recent_win_rate'].append(0)
             
+            # 统计击杀和票杀
+            if player.get('death_reason') == 'shot':
+                # 找到开枪的猎人
+                for p in game_data['players']:
+                    if p.get('death_reason') == 'killed' and p.get('killer') == player['qq']:
+                        profile['kills'] = profile.get('kills', 0) + 1
+                        break
+            
+            if player.get('death_reason') == 'voted':
+                # 统计投票数
+                vote_count = sum(1 for p in game_data['players'] 
+                               if p.get('vote') == player['number'])
+                profile['votes'] = profile.get('votes', 0) + vote_count
+            
             # 保持最近10场记录
             if len(profile['recent_win_rate']) > 10:
                 profile['recent_win_rate'] = profile['recent_win_rate'][-10:]
             
             # 保存档案
-            profile_path = f"users/{qq}.json"
+            profile_path = f"plugins/Werewolves-Master-Plugin/users/{qq}.json"
             with open(profile_path, 'w', encoding='utf-8') as f:
                 json.dump(profile, f, ensure_ascii=False, indent=2)
     
@@ -871,9 +1061,10 @@ class GamePhaseManager:
     def _get_winner_name(self, winner: str) -> str:
         """获取胜利方名称"""
         return {
-            'village': '村庄阵营',
-            'wolf': '狼人阵营', 
-            'lovers': '情侣阵营'
+            'village': '🏰 村庄阵营',
+            'wolf': '🐺 狼人阵营', 
+            'lovers': '💕 情侣阵营',
+            'draw': '🤝 平局'
         }.get(winner, '未知阵营')
 
 # ================= 主插件类 =================
@@ -911,7 +1102,6 @@ class WerewolfGamePlugin(BasePlugin):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.logger = utils_api.get_logger("WerewolfGame")
         self.gm = GameManager(self)
         self.resolver = ActionResolver(self.gm)
         self.phase_manager = GamePhaseManager(self.gm, self.resolver)
@@ -940,19 +1130,88 @@ class WerewolfGamePlugin(BasePlugin):
                     await self.resolver._broadcast_to_players(game_data, close_msg)
                     del active_games[room_id]
                     
-                    temp_file = f"games/{room_id}.json"
+                    temp_file = f"plugins/Werewolves-Master-Plugin/games/{room_id}.json"
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
 
-# ================= 命令实现 =================
+# ================= 命令基类 =================
+class WWGBaseCommand(BaseCommand):
+    """狼人杀命令基类"""
+    
+    intercept_message = True
+    
+    def _get_sender_qq(self) -> Optional[str]:
+        """获取发送者QQ号"""
+        try:
+            message_obj = getattr(self, 'message', None)
+            if not message_obj:
+                return None
+            
+            # 尝试多种可能的字段路径
+            sender_paths = [
+                "message_info.user_info.user_id",
+                "sender.user_id", 
+                "user_id",
+                "ctx.user_id",
+                "sender_qq"
+            ]
+            
+            for path in sender_paths:
+                parts = path.split('.')
+                obj = message_obj
+                for part in parts:
+                    if hasattr(obj, part):
+                        obj = getattr(obj, part)
+                    elif isinstance(obj, dict) and part in obj:
+                        obj = obj[part]
+                    else:
+                        obj = None
+                        break
+                if obj:
+                    return str(obj)
+            
+            return None
+        except Exception as e:
+            logger.error(f"获取发送者QQ失败: {e}")
+            return None
 
-class WWGHelpCommand(BaseCommand):
+class WWGNightActionCommand(WWGBaseCommand):
+    """夜晚行动基类"""
+    
+    async def _check_night_action_prerequisites(self, sender_qq: str) -> Tuple[bool, Optional[str], Optional[Dict], Optional[Dict]]:
+        """检查夜晚行动前提条件"""
+        plugin = getattr(self, 'plugin', None)
+        if not plugin:
+            return False, "❌ 插件未正确初始化", None, None
+        
+        room_id = plugin.gm.find_player_room(sender_qq)
+        if not room_id:
+            return False, "❌ 你不在任何游戏房间中", None, None
+        
+        game_data = active_games[room_id]
+        
+        if game_data['phase'] != 'night':
+            return False, "❌ 现在不是夜晚行动时间", None, None
+        
+        sender_player = next((p for p in game_data['players'] if p['qq'] == sender_qq), None)
+        if not sender_player or not sender_player['alive']:
+            return False, "❌ 死亡玩家不能行动", None, None
+        
+        all_roles = plugin.gm.get_all_roles()
+        role_info = all_roles.get(sender_player['role'], {})
+        
+        if not role_info.get('night_action', False):
+            return False, "❌ 你的角色没有夜晚行动能力", None, None
+        
+        return True, None, game_data, sender_player
+
+# ================= 游戏管理命令 =================
+class WWGHelpCommand(WWGBaseCommand):
     """狼人杀帮助命令"""
     
     command_name = "wwg_help"
     command_description = "显示狼人杀游戏帮助"
     command_pattern = r"^/wwg$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         help_text = (
@@ -986,13 +1245,12 @@ class WWGHelpCommand(BaseCommand):
         await self.send_text(help_text)
         return True, "help_sent", True
 
-class WWGRolesCommand(BaseCommand):
+class WWGRolesCommand(WWGBaseCommand):
     """查看角色代码命令"""
     
     command_name = "wwg_roles"
     command_description = "查看所有可用角色代码"
     command_pattern = r"^/wwg roles$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         plugin = getattr(self, 'plugin', None)
@@ -1004,13 +1262,12 @@ class WWGRolesCommand(BaseCommand):
             await self.send_text("❌ 无法获取角色列表")
             return False, "plugin_error", True
 
-class WWGHostCommand(BaseCommand):
+class WWGHostCommand(WWGBaseCommand):
     """创建房间命令"""
     
     command_name = "wwg_host"
     command_description = "创建狼人杀房间"
     command_pattern = r"^/wwg host$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -1066,13 +1323,12 @@ class WWGHostCommand(BaseCommand):
         await self.send_text(response)
         return True, f"room_created:{room_id}", True
 
-class WWGJoinCommand(BaseCommand):
+class WWGJoinCommand(WWGBaseCommand):
     """加入房间命令"""
     
     command_name = "wwg_join"
     command_description = "加入狼人杀房间"
     command_pattern = r"^/wwg join\s+(?P<room_id>\d+)$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         room_id = self.matched_groups.get("room_id", "").strip()
@@ -1127,20 +1383,20 @@ class WWGJoinCommand(BaseCommand):
         
         await self.send_text(response)
         
+        # 通知房主
         host_qq = game_data['host']
         if host_qq != sender_qq:
             host_msg = f"玩家 {sender_qq} 已加入房间，当前玩家数: {len(game_data['players'])}/{max_players}"
-            await send_api.text_to_user(text=host_msg, user_id=host_qq, platform="qq")
+            await MessageSender.send_private_message(host_qq, host_msg)
         
         return True, f"joined_room:{room_id}", True
 
-class WWGSettingsCommand(BaseCommand):
+class WWGSettingsCommand(WWGBaseCommand):
     """房间设置命令"""
     
     command_name = "wwg_settings"
     command_description = "修改房间设置"
     command_pattern = r"^/wwg settings\s+(?P<setting_type>\w+)(?:\s+(?P<params>.+))?$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -1257,13 +1513,12 @@ class WWGSettingsCommand(BaseCommand):
         status = "启用" if state else "禁用"
         await self.send_text(f"✅ 扩展包 '{ext_name}' 已{status}")
 
-class WWGStartCommand(BaseCommand):
+class WWGStartCommand(WWGBaseCommand):
     """开始游戏命令"""
     
     command_name = "wwg_start"
     command_description = "开始狼人杀游戏"
     command_pattern = r"^/wwg start$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -1302,13 +1557,13 @@ class WWGStartCommand(BaseCommand):
         
         return True, "game_started", True
 
-class WWGVoteCommand(BaseCommand):
+# ================= 投票命令 =================
+class WWGVoteCommand(WWGBaseCommand):
     """投票命令"""
     
     command_name = "wwg_vote"
     command_description = "投票处决玩家"
     command_pattern = r"^/wwg vote\s+(?P<player_number>\d+)$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -1344,6 +1599,7 @@ class WWGVoteCommand(BaseCommand):
             await self.send_text("❌ 该玩家已死亡")
             return False, "target_dead", True
         
+        # 记录投票
         sender_player['vote'] = int(player_number)
         game_data['last_activity'] = time.time()
         plugin.gm.save_game_file(room_id, game_data)
@@ -1351,38 +1607,7 @@ class WWGVoteCommand(BaseCommand):
         await self.send_text(f"✅ 你已投票给玩家 {player_number}")
         return True, f"voted:{player_number}", True
 
-class WWGNightActionCommand(BaseCommand):
-    """夜晚行动基类"""
-    
-    intercept_message = True
-    
-    async def _check_night_action_prerequisites(self, sender_qq: str, action: str) -> Tuple[bool, Optional[str], Optional[Dict], Optional[Dict]]:
-        """检查夜晚行动前提条件"""
-        plugin = getattr(self, 'plugin', None)
-        if not plugin:
-            return False, "❌ 插件未正确初始化", None, None
-        
-        room_id = plugin.gm.find_player_room(sender_qq)
-        if not room_id:
-            return False, "❌ 你不在任何游戏房间中", None, None
-        
-        game_data = active_games[room_id]
-        
-        if game_data['phase'] != 'night':
-            return False, "❌ 现在不是夜晚行动时间", None, None
-        
-        sender_player = next((p for p in game_data['players'] if p['qq'] == sender_qq), None)
-        if not sender_player or not sender_player['alive']:
-            return False, "❌ 死亡玩家不能行动", None, None
-        
-        all_roles = plugin.gm.get_all_roles()
-        role_info = all_roles.get(sender_player['role'], {})
-        
-        if not role_info.get('night_action', False):
-            return False, "❌ 你的角色没有夜晚行动能力", None, None
-        
-        return True, None, game_data, sender_player
-
+# ================= 夜晚行动命令 =================
 class WWGCheckCommand(WWGNightActionCommand):
     """预言家查验命令"""
     
@@ -1394,7 +1619,7 @@ class WWGCheckCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "check")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1439,7 +1664,7 @@ class WWGKillCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "kill")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1497,7 +1722,7 @@ class WWGHealCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "heal")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1546,7 +1771,7 @@ class WWGPoisonCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "poison")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1595,7 +1820,7 @@ class WWGGuardCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "guard")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1646,7 +1871,7 @@ class WWGPsychicCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "psychic")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1692,7 +1917,7 @@ class WWGSwapCommand(WWGNightActionCommand):
         player1 = self.matched_groups.get("player1", "").strip()
         player2 = self.matched_groups.get("player2", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "swap")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1743,7 +1968,7 @@ class WWGPaintCommand(WWGNightActionCommand):
         sender_qq = self._get_sender_qq()
         player_number = self.matched_groups.get("player_number", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "paint")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1799,7 +2024,7 @@ class WWGConnectCommand(WWGNightActionCommand):
         player1 = self.matched_groups.get("player1", "").strip()
         player2 = self.matched_groups.get("player2", "").strip()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "connect")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1854,7 +2079,7 @@ class WWGSkipCommand(WWGNightActionCommand):
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
         
-        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq, "skip")
+        valid, error_msg, game_data, sender_player = await self._check_night_action_prerequisites(sender_qq)
         if not valid:
             await self.send_text(error_msg)
             return False, "action_failed", True
@@ -1874,13 +2099,13 @@ class WWGSkipCommand(WWGNightActionCommand):
         await self.send_text("✅ 已跳过本次行动")
         return True, "skipped", True
 
-class WWGShootCommand(BaseCommand):
+# ================= 白天行动命令 =================
+class WWGShootCommand(WWGBaseCommand):
     """猎人开枪命令"""
     
     command_name = "wwg_shoot"
     command_description = "猎人开枪带走玩家"
     command_pattern = r"^/wwg shoot\s+(?P<player_number>\d+)$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -1937,13 +2162,12 @@ class WWGShootCommand(BaseCommand):
         
         return True, f"shot:{player_number}", True
 
-class WWGExplodeCommand(BaseCommand):
+class WWGExplodeCommand(WWGBaseCommand):
     """白狼王自爆命令"""
     
     command_name = "wwg_explode"
     command_description = "白狼王自爆并带走玩家"
     command_pattern = r"^/wwg explode\s+(?P<player_number>\d+)$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -2005,13 +2229,13 @@ class WWGExplodeCommand(BaseCommand):
         
         return True, f"exploded:{player_number}", True
 
-class WWGProfileCommand(BaseCommand):
+# ================= 档案和记录查询命令 =================
+class WWGProfileCommand(WWGBaseCommand):
     """查询档案命令"""
     
     command_name = "wwg_profile"
     command_description = "查询玩家档案"
     command_pattern = r"^/wwg profile(?:\s+(?P<target_qq>\d+))?$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         sender_qq = self._get_sender_qq()
@@ -2058,13 +2282,12 @@ class WWGProfileCommand(BaseCommand):
         await self.send_text(profile_text)
         return True, "profile_shown", True
 
-class WWGArchiveCommand(BaseCommand):
+class WWGArchiveCommand(WWGBaseCommand):
     """查询对局记录命令"""
     
     command_name = "wwg_archive"
     command_description = "查询对局记录"
     command_pattern = r"^/wwg archive\s+(?P<archive_code>\w+)$"
-    intercept_message = True
     
     async def execute(self) -> Tuple[bool, str, bool]:
         archive_code = self.matched_groups.get("archive_code", "").strip().upper()
@@ -2078,9 +2301,10 @@ class WWGArchiveCommand(BaseCommand):
         # 生成对局详情
         winner = game_data.get('winner', 'unknown')
         winner_name = {
-            'village': '村庄阵营',
-            'wolf': '狼人阵营',
-            'lovers': '情侣阵营',
+            'village': '🏰 村庄阵营',
+            'wolf': '🐺 狼人阵营',
+            'lovers': '💕 情侣阵营',
+            'draw': '🤝 平局',
             'unknown': '未知'
         }.get(winner, '未知')
         
@@ -2102,7 +2326,7 @@ class WWGArchiveCommand(BaseCommand):
         
         for player in game_data['players']:
             role_name = all_roles[player['role']]['name']
-            status = "存活" if player['alive'] else "死亡"
+            status = "✅ 存活" if player['alive'] else "❌ 死亡"
             death_reason = f" ({player.get('death_reason')})" if not player['alive'] else ""
             archive_text += f"玩家 {player['number']}: {role_name} - {status}{death_reason}\n"
         
@@ -2116,6 +2340,7 @@ class WerewolfGamePlugin(WerewolfGamePlugin):
     
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         return [
+            # 游戏管理命令
             (WWGHelpCommand.get_command_info(), WWGHelpCommand),
             (WWGRolesCommand.get_command_info(), WWGRolesCommand),
             (WWGHostCommand.get_command_info(), WWGHostCommand),
@@ -2123,6 +2348,8 @@ class WerewolfGamePlugin(WerewolfGamePlugin):
             (WWGSettingsCommand.get_command_info(), WWGSettingsCommand),
             (WWGStartCommand.get_command_info(), WWGStartCommand),
             (WWGVoteCommand.get_command_info(), WWGVoteCommand),
+            
+            # 夜晚行动命令
             (WWGCheckCommand.get_command_info(), WWGCheckCommand),
             (WWGKillCommand.get_command_info(), WWGKillCommand),
             (WWGHealCommand.get_command_info(), WWGHealCommand),
@@ -2133,8 +2360,12 @@ class WerewolfGamePlugin(WerewolfGamePlugin):
             (WWGPaintCommand.get_command_info(), WWGPaintCommand),
             (WWGConnectCommand.get_command_info(), WWGConnectCommand),
             (WWGSkipCommand.get_command_info(), WWGSkipCommand),
+            
+            # 白天行动命令
             (WWGShootCommand.get_command_info(), WWGShootCommand),
             (WWGExplodeCommand.get_command_info(), WWGExplodeCommand),
+            
+            # 档案和记录查询命令
             (WWGProfileCommand.get_command_info(), WWGProfileCommand),
             (WWGArchiveCommand.get_command_info(), WWGArchiveCommand),
         ]

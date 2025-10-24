@@ -1,0 +1,38 @@
+# werewolf_game - 自动生成的配置文件
+# 让麦麦帮你开展惊险刺激（并不）的狼人杀游戏！
+
+# 插件基础配置
+[plugin]
+
+# 是否启用插件
+enabled = true
+
+# 配置文件版本
+config_version = "1.0.0"
+
+
+# 游戏规则配置
+[game]
+
+# 房间超时时间(秒)
+room_timeout = 1200
+
+# 对局超时时间(秒)
+game_timeout = 1800
+
+# 夜晚持续时间(秒)
+night_duration = 300
+
+# 白天持续时间(秒)
+day_duration = 300
+
+# 最小玩家数
+min_players = 6
+
+# 最大玩家数
+max_players = 18
+
+# 猎人复仇时间(秒)
+revenge_time = 60
+
+

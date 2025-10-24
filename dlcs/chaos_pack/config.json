@@ -1,0 +1,65 @@
+{
+  "dlc_id": "CH01",
+  "dlc_name": "混乱者包",
+  "author": "Assistant",
+  "version": "1.0.0",
+  "description": "为游戏增加混乱和不确定性的角色扩展包，包含9个全新角色",
+  "min_players": 8,
+  "recommended_players": 12,
+  "roles": [
+    {
+      "code": "hidden_wolf",
+      "name": "隐狼",
+      "team": "werewolf",
+      "type": "特殊狼人"
+    },
+    {
+      "code": "guard", 
+      "name": "守卫",
+      "team": "village",
+      "type": "神民"
+    },
+    {
+      "code": "magician",
+      "name": "魔术师", 
+      "team": "village",
+      "type": "神民"
+    },
+    {
+      "code": "double_face",
+      "name": "双面人",
+      "team": "neutral", 
+      "type": "第三方"
+    },
+    {
+      "code": "spiritualist",
+      "name": "通灵师",
+      "team": "village",
+      "type": "神民"
+    },
+    {
+      "code": "successor",
+      "name": "继承者",
+      "team": "village", 
+      "type": "村民"
+    },
+    {
+      "code": "skin_walker",
+      "name": "画皮",
+      "team": "werewolf",
+      "type": "特殊狼人"
+    },
+    {
+      "code": "white_wolf_king",
+      "name": "白狼王",
+      "team": "werewolf",
+      "type": "特殊狼人"
+    },
+    {
+      "code": "cupid",
+      "name": "丘比特",
+      "team": "neutral",
+      "type": "第三方"
+    }
+  ]
+}

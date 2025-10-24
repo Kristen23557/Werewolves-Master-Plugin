@@ -132,10 +132,10 @@ class WerewolfDLC:
 class WerewolfGamePlugin(BasePlugin):
     """狼人杀游戏插件"""
 
-    plugin_name = "werewolf_game"
+    plugin_name = "Werewolves-Master-Plugin"
     plugin_description = "纯指令驱动的狼人杀游戏"
     plugin_version = "1.0.0"
-    plugin_author = "Assistant"
+    plugin_author = "KArabella"
     enable_plugin = True
 
     dependencies = []
@@ -494,7 +494,6 @@ class WerewolfCommand(BaseCommand):
 💡 **使用说明**
 在房间设置中使用角色代号设置角色数量：
 /wwg settings roles [角色代号] [数量]
-
 例如：
 /wwg settings roles seer 1
 /wwg settings roles guard 1
@@ -1209,12 +1208,10 @@ class WerewolfCommand(BaseCommand):
 🔸 `/wwg list` - 查看可用房间
 🔸 `/wwg dlc list` - 查看可用扩展包
 🔸 `/wwg roles list` - 查看所有可用角色代号
-
 **房间设置参数：**
 🔹 `players [6-18]` - 设置玩家数量
 🔹 `extends [扩展ID] [true/false]` - 启用/禁用扩展
 🔹 `roles [角色代号] [数量]` - 设置角色数量
-
 **游戏内命令：**
 🔸 `/wwg vote [玩家号]` - 白天投票
 🔸 `/wwg vote skip` - 跳过投票
@@ -1225,14 +1222,12 @@ class WerewolfCommand(BaseCommand):
 🔸 `/wwg revenge [玩家号]` - 猎人复仇
 🔸 `/wwg explode [玩家号]` - 白狼王自爆
 🔸 `/wwg status` - 查看游戏状态
-
 **扩展包命令：**
 🔸 `/wwg guard [玩家号]` - 守卫守护
 🔸 `/wwg swap [号码1] [号码2]` - 魔术师交换
 🔸 `/wwg reveal [玩家号]` - 通灵师查验
 🔸 `/wwg disguise [玩家号]` - 画皮伪装
 🔸 `/wwg couple [号码1] [号码2]` - 丘比特连接
-
 **基础角色：**
 🐺 狼人(wolf) - 每晚杀人
 🔮 预言家(seer) - 每晚查验身份

@@ -407,52 +407,64 @@ class WerewolfCommand(BaseCommand):
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行命令逻辑"""
-        matched_groups = self.matched_groups or {}
-        action = matched_groups.get("action", "").lower()
-        params = matched_groups.get("params", "")
+        try:
+            # 安全地获取匹配组
+            if self.matched_groups is None:
+                # 如果匹配失败，显示帮助
+                return await self._show_help()
+                
+            matched_groups = self.matched_groups
+            action = matched_groups.get("action", "").lower().strip()
+            params = matched_groups.get("params", "").strip()
 
-        # 获取用户和群组信息
-        user_id = str(self.message.message_info.user_info.user_id)
-        group_info = self.message.message_info.group_info
-        group_id = str(group_info.group_id) if group_info else "private"
+            # 获取用户和群组信息
+            user_id = str(self.message.message_info.user_info.user_id)
+            group_info = self.message.message_info.group_info
+            group_id = str(group_info.group_id) if group_info else "private"
 
-        # 检查是否是角色查询命令
-        if action == "roles":
-            return await self._handle_role_commands(params)
+            # 检查是否是角色查询命令
+            if action == "roles":
+                return await self._handle_role_commands(params)
 
-        # 检查是否是DLC管理命令
-        if action == "dlc":
-            dlc_handled, result_msg, should_intercept = await self._handle_dlc_commands(user_id, None, params, "")
-            if dlc_handled:
-                return dlc_handled, result_msg, should_intercept
+            # 检查是否是DLC管理命令
+            if action == "dlc":
+                dlc_handled, result_msg, should_intercept = await self._handle_dlc_commands(user_id, None, params, "")
+                if dlc_handled:
+                    return dlc_handled, result_msg, should_intercept
+                else:
+                    await self.send_text("❌ 未知DLC命令。使用: /wwg dlc list")
+                    return False, "未知DLC命令", True
+
+            # 检查是否是游戏内行动命令
+            game_action_handled = await self._handle_game_actions(user_id, group_id, action, params)
+            if game_action_handled:
+                return True, "游戏行动已处理", True
+
+            # 常规命令处理
+            if action in ["帮助", "help"]:
+                return await self._show_help()
+            elif action == "host":
+                return await self._create_room(user_id, group_id)
+            elif action == "join":
+                return await self._join_room(user_id, group_id, params)
+            elif action == "settings":
+                return await self._room_settings(user_id, group_id, params)
+            elif action == "start":
+                return await self._start_game(user_id, group_id)
+            elif action == "profile":
+                return await self._show_profile(user_id, params)
+            elif action == "archive":
+                return await self._show_archive(params)
+            elif action == "list":
+                return await self._list_rooms()
             else:
-                await self.send_text("❌ 未知DLC命令。使用: /wwg dlc list")
-                return False, "未知DLC命令", True
-
-        # 检查是否是游戏内行动命令
-        if await self._handle_game_actions(user_id, group_id, action, params):
-            return True, "游戏行动已处理", True
-
-        # 常规命令处理
-        if action == "帮助":
-            return await self._show_help()
-        elif action == "host":
-            return await self._create_room(user_id, group_id)
-        elif action == "join":
-            return await self._join_room(user_id, group_id, params)
-        elif action == "settings":
-            return await self._room_settings(user_id, group_id, params)
-        elif action == "start":
-            return await self._start_game(user_id, group_id)
-        elif action == "profile":
-            return await self._show_profile(user_id, params)
-        elif action == "archive":
-            return await self._show_archive(params)
-        elif action == "list":
-            return await self._list_rooms()
-        else:
-            await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
-            return False, "未知命令", True
+                await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
+                return False, "未知命令", True
+                
+        except Exception as e:
+            print(f"命令执行错误: {e}")
+            await self.send_text("❌ 命令执行出错，请稍后重试。")
+            return False, f"命令执行异常: {e}", True
 
     @property
     def plugin_instance(self):

@@ -405,6 +405,12 @@ class WerewolfCommand(BaseCommand):
     command_pattern = r"^/wwg\s+(?P<action>\S+)(?:\s+(?P<params>.*))?$"
     intercept_message = True
 
+    @property
+    def plugin_instance(self):
+        """动态获取插件实例"""
+        from src.plugin_system.plugin_manager import get_plugin_instance
+        return get_plugin_instance("Werewolves-Master-Plugin")
+
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行命令逻辑"""
         try:
@@ -427,38 +433,15 @@ class WerewolfCommand(BaseCommand):
 
             # 检查是否是DLC管理命令
             if action == "dlc":
-                # 直接调用 _handle_dlc_commands 并返回结果
-                dlc_params = params.split()
-                dlc_action = dlc_params[0] if dlc_params else "list"
-                dlc_remaining_params = " ".join(dlc_params[1:]) if len(dlc_params) > 1 else ""
-                
-                result = await self._handle_dlc_commands(user_id, None, dlc_action, dlc_remaining_params)
-                return result
+                return await self._handle_dlc_management(user_id, params)
 
             # 检查是否是游戏内行动命令
-            if await self._handle_game_actions(user_id, group_id, action, params):
+            game_action_handled = await self._handle_game_actions(user_id, group_id, action, params)
+            if game_action_handled:
                 return True, "游戏行动已处理", True
 
             # 常规命令处理
-            if action in ["帮助", "help"]:
-                return await self._show_help()
-            elif action == "host":
-                return await self._create_room(user_id, group_id)
-            elif action == "join":
-                return await self._join_room(user_id, group_id, params)
-            elif action == "settings":
-                return await self._room_settings(user_id, group_id, params)
-            elif action == "start":
-                return await self._start_game(user_id, group_id)
-            elif action == "profile":
-                return await self._show_profile(user_id, params)
-            elif action == "archive":
-                return await self._show_archive(params)
-            elif action == "list":
-                return await self._list_rooms()
-            else:
-                await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
-                return False, "未知命令", True
+            return await self._handle_regular_commands(user_id, group_id, action, params)
                 
         except Exception as e:
             print(f"ERROR in execute: {e}")
@@ -467,18 +450,107 @@ class WerewolfCommand(BaseCommand):
             await self.send_text("❌ 命令执行出错，请稍后重试。")
             return False, f"命令执行异常: {e}", True
 
-    @property
-    def plugin_instance(self):
-        """动态获取插件实例"""
-        from src.plugin_system.plugin_manager import get_plugin_instance
-        return get_plugin_instance("Werewolves-Master-Plugin")
-    
-    async def execute(self) -> Tuple[bool, Optional[str], bool]:
-        """执行命令逻辑"""
-        # 现在可以直接使用 self.plugin_instance
-        matched_groups = self.matched_groups or {}
-        action = matched_groups.get("action", "").lower()
-        params = matched_groups.get("params", "")
+    async def _handle_regular_commands(self, user_id: str, group_id: str, action: str, params: str) -> Tuple[bool, str, bool]:
+        """处理常规命令"""
+        if action in ["帮助", "help"]:
+            return await self._show_help()
+        elif action == "host":
+            return await self._create_room(user_id, group_id)
+        elif action == "join":
+            return await self._join_room(user_id, group_id, params)
+        elif action == "settings":
+            return await self._room_settings(user_id, group_id, params)
+        elif action == "start":
+            return await self._start_game(user_id, group_id)
+        elif action == "profile":
+            return await self._show_profile(user_id, params)
+        elif action == "archive":
+            return await self._show_archive(params)
+        elif action == "list":
+            return await self._list_rooms()
+        else:
+            await self.send_text("❌ 未知命令。使用 /wwg 帮助 查看可用命令。")
+            return False, "未知命令", True
+
+    async def _handle_dlc_management(self, user_id: str, params: str) -> Tuple[bool, str, bool]:
+        """处理DLC管理命令"""
+        params_list = params.split()
+        dlc_action = params_list[0] if params_list else "list"
+        dlc_params = " ".join(params_list[1:]) if len(params_list) > 1 else ""
+        
+        if dlc_action == "list":
+            plugin = self.plugin_instance
+            if not plugin.active_dlcs:
+                await self.send_text("❌ 没有可用的扩展包。")
+                return True, "没有可用扩展包", True
+            
+            msg = "🎮 **可用扩展包列表**\n\n"
+            for dlc_id, dlc in plugin.active_dlcs.items():
+                msg += f"🔹 {dlc.dlc_name} (ID: {dlc_id})\n"
+                msg += f"   作者: {dlc.author}\n"
+                msg += f"   版本: {dlc.version}\n"
+                msg += f"   角色数: {len(dlc.roles)}\n"
+                msg += "   ---\n"
+            
+            await self.send_text(msg)
+            return True, "已显示扩展包列表", True
+        else:
+            await self.send_text("❌ 未知的DLC命令。使用: /wwg dlc list")
+            return False, "未知DLC命令", True
+
+    async def _handle_game_actions(self, user_id: str, group_id: str, action: str, params: str) -> bool:
+        """处理游戏内行动命令"""
+        # 查找用户所在的游戏
+        game_data = None
+        room_id = None
+        
+        for rid, game in active_games.items():
+            if user_id in game.get("players", {}) and group_id == game.get("group_id"):
+                game_data = game
+                room_id = rid
+                break
+        
+        if not game_data:
+            return False
+
+        # 先尝试处理扩展包命令
+        dlc_handled = await self._handle_dlc_game_commands(user_id, game_data, action, params)
+        if dlc_handled:
+            return True
+
+        # 游戏行动命令处理
+        if action == "vote":
+            return await self._handle_vote(user_id, game_data, params)
+        elif action == "skip":
+            return await self._handle_skip(user_id, game_data)
+        elif action in ["check", "kill", "potion"]:
+            return await self._handle_night_action(user_id, game_data, action, params)
+        elif action == "revenge":
+            return await self._handle_revenge(user_id, game_data, params)
+        elif action == "status":
+            return await self._show_game_status(game_data)
+        elif action == "explode":
+            return await self._handle_white_wolf_explode(user_id, game_data, params)
+        
+        return False
+
+    async def _handle_dlc_game_commands(self, user_id: str, game_data: Dict, action: str, params: str) -> bool:
+        """处理游戏内的DLC命令"""
+        try:
+            plugin = self.plugin_instance
+            enabled_dlcs = game_data.get("settings", {}).get("enabled_dlcs", [])
+            
+            for dlc_id in enabled_dlcs:
+                if dlc_id in plugin.active_dlcs:
+                    dlc = plugin.active_dlcs[dlc_id]
+                    handled = await dlc.handle_command(user_id, game_data, action, params)
+                    if handled:
+                        return True
+            
+            return False
+        except Exception as e:
+            print(f"ERROR in _handle_dlc_game_commands: {e}")
+            return False
 
     async def _handle_role_commands(self, params: str) -> Tuple[bool, str, bool]:
         """处理角色查询命令"""
@@ -545,82 +617,14 @@ class WerewolfCommand(BaseCommand):
         }
         return team_emojis.get(team, "❓")
 
-    async def _handle_game_actions(self, user_id: str, group_id: str, action: str, params: str) -> bool:
-        """处理游戏内行动命令"""
-        # 查找用户所在的游戏
-        game_data = None
-        room_id = None
-        
-        for rid, game in active_games.items():
-            if user_id in game.get("players", {}) and group_id == game.get("group_id"):
-                game_data = game
-                room_id = rid
-                break
-        
-        if not game_data:
-            return False
-
-        # 先尝试处理扩展包命令
-        dlc_handled, _, _ = await self._handle_dlc_commands(user_id, game_data, action, params)
-        if dlc_handled:
-            return True
-
-        # 游戏行动命令处理
-        if action == "vote":
-            return await self._handle_vote(user_id, game_data, params)
-        elif action == "skip":
-            return await self._handle_skip(user_id, game_data)
-        elif action in ["check", "kill", "potion"]:
-            return await self._handle_night_action(user_id, game_data, action, params)
-        elif action == "revenge":
-            return await self._handle_revenge(user_id, game_data, params)
-        elif action == "status":
-            return await self._show_game_status(game_data)
-        elif action == "explode":
-            return await self._handle_white_wolf_explode(user_id, game_data, params)
-        
-        return False
-
-    async def _handle_dlc_commands(self, user_id: str, game_data: Dict = None, action: str = "", params: str = "") -> Tuple[bool, str, bool]:
-        """处理扩展包命令"""
-        try:
-            # 如果 game_data 为 None，说明是 DLC 管理命令
-            if game_data is None:
-                if action == "list":
-                    plugin = self.plugin_instance
-                    if not plugin.active_dlcs:
-                        await self.send_text("❌ 没有可用的扩展包。")
-                        return True, "没有可用扩展包", True
-                    
-                    msg = "🎮 **可用扩展包列表**\n\n"
-                    for dlc_id, dlc in plugin.active_dlcs.items():
-                        msg += f"🔹 {dlc.dlc_name} (ID: {dlc_id})\n"
-                        msg += f"   作者: {dlc.author}\n"
-                        msg += f"   版本: {dlc.version}\n"
-                        msg += f"   角色数: {len(dlc.roles)}\n"
-                        msg += "   ---\n"
-                    
-                    await self.send_text(msg)
-                    return True, "已显示扩展包列表", True
-                else:
-                    return False, "未知DLC命令", False
-            
-            # 游戏内DLC命令
-            plugin = self.plugin_instance
-            enabled_dlcs = game_data.get("settings", {}).get("enabled_dlcs", [])
-            
-            for dlc_id in enabled_dlcs:
-                if dlc_id in plugin.active_dlcs:
-                    dlc = plugin.active_dlcs[dlc_id]
-                    handled = await dlc.handle_command(user_id, game_data, action, params)
-                    if handled:
-                        return True, "DLC命令已处理", True
-            
-            return False, "未处理的DLC命令", False
-            
-        except Exception as e:
-            print(f"ERROR in _handle_dlc_commands: {e}")
-            return False, f"DLC命令处理异常: {e}", False
+    def _get_team_name(self, team: str) -> str:
+        """获取阵营名称"""
+        team_names = {
+            "village": "村庄阵营",
+            "werewolf": "狼人阵营",
+            "neutral": "第三方阵营"
+        }
+        return team_names.get(team, "未知阵营")
 
     async def _handle_vote(self, user_id: str, game_data: Dict, params: str) -> bool:
         """处理投票"""
@@ -1533,13 +1537,9 @@ class WerewolfCommand(BaseCommand):
         if team == "werewolf" and role_info.get("vote_action"):
             # 找到狼队友
             teammates = []
-            for pid, info in game_data["players"].items():
-                if (info.get("team") == "werewolf" and 
-                    info.get("vote_action") and 
-                    info.get("player_number") != player_num):
-                    teammates.append(info["player_number"])
-            if teammates:
-                message += f"🐺 狼队友: {', '.join(map(str, teammates))}\n"
+            # 注意：这里需要访问game_data，但在这个方法中不可用
+            # 这个信息会在游戏开始后的私聊中单独发送
+            pass
 
         if role_info.get("night_action"):
             message += f"\n🌙 夜晚行动命令: /wwg {role_info['action_command']} [目标]\n"
@@ -1550,15 +1550,6 @@ class WerewolfCommand(BaseCommand):
         message += f"\n📖 使用 `/wwg 帮助` 查看游戏命令"
 
         return message
-
-    def _get_team_name(self, team: str) -> str:
-        """获取阵营名称"""
-        team_names = {
-            "village": "村庄阵营",
-            "werewolf": "狼人阵营",
-            "neutral": "第三方阵营"
-        }
-        return team_names.get(team, "未知阵营")
 
     def _generate_room_id(self) -> str:
         """生成房间ID"""

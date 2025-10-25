@@ -1,0 +1,29 @@
+# Werewolves-Master-Plugin - 自动生成的配置文件
+# 让麦麦帮你开展惊险刺激（并不）的狼人杀游戏！
+
+# 插件基础配置
+[plugin]
+
+# 是否启用插件
+enabled = true
+
+# 最大玩家数
+max_players = 18
+
+# 最小玩家数
+min_players = 6
+
+
+# 游戏设置
+[game]
+
+# 夜晚持续时间(秒)
+night_duration = 300
+
+# 白天持续时间(秒)
+day_duration = 300
+
+# 不活动超时时间(秒)
+inactive_timeout = 1200
+
+

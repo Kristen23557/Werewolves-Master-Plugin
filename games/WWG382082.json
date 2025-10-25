@@ -1,0 +1,67 @@
+{
+  "room_id": "WWG382082",
+  "host": "2785185004",
+  "group_id": "729317941",
+  "players": {
+    "2785185004": {
+      "name": "玩家",
+      "qq": "2785185004",
+      "number": 1,
+      "role": null,
+      "original_role": null,
+      "status": "alive",
+      "death_reason": null,
+      "killer": null,
+      "has_acted": false,
+      "is_lover": false,
+      "lover_partner": null,
+      "inherited_skill": null
+    }
+  },
+  "player_order": [
+    "2785185004"
+  ],
+  "settings": {
+    "player_count": 6,
+    "roles": {
+      "villager": 2,
+      "seer": 1,
+      "witch": 1,
+      "hunter": 0,
+      "wolf": 2,
+      "hidden_wolf": 0,
+      "guard": 0,
+      "magician": 0,
+      "double_faced": 0,
+      "spiritualist": 0,
+      "successor": 0,
+      "painter": 0,
+      "white_wolf": 0,
+      "cupid": 0
+    }
+  },
+  "phase": "setup",
+  "day_count": 0,
+  "night_actions": {},
+  "day_actions": {},
+  "votes": {},
+  "death_queue": [],
+  "lovers": [],
+  "guard_protected": null,
+  "last_guard_target": null,
+  "magician_swap": null,
+  "painter_disguised": null,
+  "successor_skills": {},
+  "hidden_wolf_awakened": false,
+  "white_wolf_exploded": false,
+  "witch_status": "has_both",
+  "witch_save_candidates": [],
+  "witch_used_save_this_night": false,
+  "witch_used_poison_this_night": false,
+  "created_time": "2025-10-25T16:48:02.675406",
+  "started_time": null,
+  "ended_time": null,
+  "winner": null,
+  "game_code": null,
+  "phase_start_time": 1761382082.675406,
+  "saved_players": 

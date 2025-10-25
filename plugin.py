@@ -1589,7 +1589,7 @@ class WerewolfGameCommand(BaseCommand):
         for player in game["players"].values():
             status_icon = "💚" if player["status"] == PlayerStatus.ALIVE.value else "💀"
             role_display = "???" if game["phase"] in [GamePhase.SETUP.value, GamePhase.NIGHT.value, GamePhase.DAY.value] else ROLES[player["original_role"]]["name"]
-            status_text += f"  {player['number']}号 - {player['name']} {status_icon} ({role_display})\n"
+            status_text += f"  {player['number']}号 - {self._get_user_nickname(player['qq'])} {status_icon} ({role_display})\n"
         
         status_text += "\n🎭 角色设置:\n"
         for role_id, count in game["settings"]["roles"].items():
@@ -1761,7 +1761,7 @@ class WerewolfGameCommand(BaseCommand):
             await self._send_group_message(game, 
                 "🎮 游戏开始！\n"
                 "🌙 首夜降临，请有夜晚行动能力的玩家查看私聊消息获取角色信息并行动。\n"
-                "💡 行动顺序：丘比特 → 守卫 → 狼人 → 女巫 → 预言家 → 通灵师 → 魔术师\n"
+                "💡 行动顺序：无顺序，若女巫需要考虑解药请选择跳过毒药行动，后续会有独立的解药阶段以供放药\n"
                 "⏰ 请在 5分钟 内完成行动"
             )
             

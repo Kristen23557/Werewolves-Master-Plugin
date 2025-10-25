@@ -1237,7 +1237,11 @@ class GameLogicProcessor:
     
     async def _send_night_start_message(self, game: Dict[str, Any], room_id: str):
         """发送夜晚开始消息"""
-        message = f"🌙 第 {game['day_count']} 夜开始！请有夜晚行动能力的玩家使用相应命令行动。"
+        if game["day_count"] == 1:
+            message = f"🌙 第 {game['day_count']} 夜（首夜）开始！\n请有夜晚行动能力的玩家使用相应命令行动。\n\n行动顺序：\n1. 丘比特（仅首夜）\n2. 守卫\n3. 狼人\n4. 女巫\n5. 预言家\n6. 通灵师\n7. 魔术师\n8. 画皮（第二夜起）"
+        else:
+            message = f"🌙 第 {game['day_count']} 夜开始！请有夜晚行动能力的玩家使用相应命令行动。"
+        
         await self._send_group_message(game, message)
         
         # 私聊通知有行动的玩家
@@ -1250,15 +1254,73 @@ class GameLogicProcessor:
                 description = role_info["description"]
                 
                 if command:
-                    await self._send_private_message(game, player["qq"],
-                                                   f"🌙 第 {game['day_count']} 夜，你的身份是: {role_info['name']}\n"
-                                                   f"能力: {description}\n"
-                                                   f"使用命令: /wwg {command} <目标号码>")
+                    detailed_message = self._get_detailed_role_message(player, game)
+                    await self._send_private_message(game, player["qq"], detailed_message)
     
     async def _send_day_start_message(self, game: Dict[str, Any], room_id: str):
         """发送白天开始消息"""
-        message = f"☀️ 第 {game['day_count']} 天开始！请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。"
+        if game["day_count"] == 1:
+            message = f"☀️ 第 {game['day_count']} 天（首日）开始！\n请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。\n\n💡 提示：首日发言请谨慎，注意观察其他玩家的发言行为。"
+        else:
+            message = f"☀️ 第 {game['day_count']} 天开始！请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。"
+        
         await self._send_group_message(game, message)
+    
+    def _get_detailed_role_message(self, player: Dict[str, Any], game: Dict[str, Any]) -> str:
+        """获取详细的角色消息"""
+        role = player["role"]
+        role_info = ROLES[role]
+        command = role_info["command"]
+        
+        message = f"🌙 第 {game['day_count']} 夜行动\n"
+        message += f"你的身份：{role_info['name']}\n"
+        message += f"你的号码：{player['number']}号\n\n"
+        message += f"🎯 角色能力：{role_info['description']}\n\n"
+        
+        # 特殊角色的额外信息
+        if role == "witch":
+            witch_status = game["witch_status"]
+            status_text = {
+                WitchStatus.HAS_BOTH.value: "💊 你有解药和毒药",
+                WitchStatus.HAS_SAVE_ONLY.value: "💊 你只有解药",
+                WitchStatus.HAS_POISON_ONLY.value: "☠️ 你只有毒药",
+                WitchStatus.USED_BOTH.value: "❌ 你已无药可用"
+            }.get(witch_status, "💊 状态未知")
+            message += f"{status_text}\n\n"
+        
+        elif role == "wolf":
+            # 显示狼队友信息
+            wolf_teammates = []
+            for p in game["players"].values():
+                if (p["qq"] != player["qq"] and 
+                    ROLES[p["role"]]["camp"] == Camp.WOLF and 
+                    p["role"] != "hidden_wolf" and
+                    p["status"] == PlayerStatus.ALIVE.value):
+                    wolf_teammates.append(f"{p['number']}号")
+            
+            if wolf_teammates:
+                message += f"🐺 你的狼队友：{', '.join(wolf_teammates)}\n\n"
+            else:
+                message += "🐺 你是唯一的狼人\n\n"
+        
+        elif role == "guard":
+            last_target = game.get("last_guard_target")
+            if last_target:
+                message += f"🛡️ 上一夜你守护了 {last_target} 号玩家，今晚不能守护同一人\n\n"
+        
+        elif role == "painter" and game["day_count"] >= 2:
+            message += "🎨 从第二夜开始，你可以伪装成已出局玩家的身份\n\n"
+        
+        message += f"📝 使用命令：/wwg {command} <目标号码>\n"
+        
+        if role == "magician":
+            message += "💡 示例：/wwg swap 3 5 （交换3号和5号）"
+        elif role == "cupid":
+            message += "💡 示例：/wwg choose 2 4 （选择2号和4号成为情侣）"
+        else:
+            message += "💡 示例：/wwg check 3 （查验3号玩家）"
+        
+        return message
 
 # ==================== 测试命令 ====================
 class TestPrivateMessageCommand(BaseCommand):
@@ -1327,7 +1389,6 @@ class WerewolfGameCommand(BaseCommand):
         "/wwg shoot <号码> - 猎人开枪\n"
         "/wwg explode <号码> - 白狼王自爆\n"
         "/wwg skip - 跳过行动\n"
-        "请所有玩家确认：你已经添加了机器人的私聊好友并且和她有过消息来往才可使用插件进行游戏"
     )
     intercept_message = True
     
@@ -1483,12 +1544,14 @@ class WerewolfGameCommand(BaseCommand):
         status_text = f"📊 房间状态 - {room_id}\n"
         status_text += f"👤 房主: {game['host']}\n"
         status_text += f"🎯 玩家: {len(game['players'])}/{game['settings']['player_count']}\n"
-        status_text += f"📝 游戏阶段: {game['phase']}\n\n"
+        status_text += f"📝 游戏阶段: {self._get_phase_display_name(game['phase'])}\n\n"
         
         # 玩家列表
         status_text += "👥 当前玩家:\n"
         for player in game["players"].values():
-            status_text += f"  {player['number']}号 - {player['name']} (QQ: {player['qq']})\n"
+            status_icon = "💚" if player["status"] == PlayerStatus.ALIVE.value else "💀"
+            role_display = "???" if game["phase"] in [GamePhase.SETUP.value, GamePhase.NIGHT.value, GamePhase.DAY.value] else ROLES[player["original_role"]]["name"]
+            status_text += f"  {player['number']}号 - {player['name']} {status_icon} ({role_display})\n"
         
         status_text += "\n🎭 角色设置:\n"
         for role_id, count in game["settings"]["roles"].items():
@@ -1498,6 +1561,19 @@ class WerewolfGameCommand(BaseCommand):
         
         await self.send_text(status_text)
         return True, "显示房间状态", True
+    
+    def _get_phase_display_name(self, phase: str) -> str:
+        """获取阶段显示名称"""
+        phase_names = {
+            GamePhase.SETUP.value: "🛠️ 准备阶段",
+            GamePhase.NIGHT.value: "🌙 夜晚阶段",
+            GamePhase.DAY.value: "☀️ 白天阶段",
+            GamePhase.VOTE.value: "🗳️ 投票阶段",
+            GamePhase.HUNTER_REVENGE.value: "🔫 猎人复仇",
+            GamePhase.WITCH_SAVE_PHASE.value: "💊 女巫救药",
+            GamePhase.ENDED.value: "🎮 游戏结束"
+        }
+        return phase_names.get(phase, phase)
     
     async def _destroy_game(self):
         """销毁房间"""
@@ -1624,34 +1700,53 @@ class WerewolfGameCommand(BaseCommand):
         success = self.game_manager.start_game(room_id)
         
         if success:
-            # 私聊发送角色信息给所有玩家
+            # 发送首夜开始消息到群聊
+            await self._send_group_message(game, 
+                "🎮 游戏开始！\n"
+                "🌙 首夜降临，请有夜晚行动能力的玩家查看私聊消息获取角色信息并行动。\n"
+                "💡 行动顺序：丘比特 → 守卫 → 狼人 → 女巫 → 预言家 → 通灵师 → 魔术师"
+            )
+            
+            # 私聊发送详细的角色信息给所有玩家
             for player_qq, player in game["players"].items():
                 role = player["role"]
                 role_info = ROLES[role]
                 
-                message = f"🎮 游戏开始！\n你的身份是: {role_info['name']}\n号码: {player['number']}\n"
+                message = f"🎮 游戏开始！\n\n"
+                message += f"📍 房间号: {room_id}\n"
+                message += f"🎯 你的身份: {role_info['name']}\n"
+                message += f"🔢 你的号码: {player['number']}号\n\n"
+                message += f"📖 角色描述: {role_info['description']}\n\n"
                 
-                if role_info["description"]:
-                    message += f"能力: {role_info['description']}\n"
-                
-                # 如果是狼人，显示狼队友
+                # 特殊角色的额外信息
                 if role_info["camp"] == Camp.WOLF and role != "hidden_wolf":
+                    # 显示狼队友信息
                     wolf_teammates = []
                     for p in game["players"].values():
                         if (p["qq"] != player_qq and 
                             ROLES[p["role"]]["camp"] == Camp.WOLF and 
                             p["role"] != "hidden_wolf"):
-                            wolf_teammates.append(f"{p['number']}号")
+                            wolf_teammates.append(f"{p['number']}号 {p['name']}")
                     
                     if wolf_teammates:
-                        message += f"🐺 你的狼队友: {', '.join(wolf_teammates)}\n"
+                        message += f"🐺 你的狼队友:\n"
+                        for teammate in wolf_teammates:
+                            message += f"  • {teammate}\n"
+                        message += "\n"
                 
                 if role_info["command"]:
-                    message += f"使用命令: /wwg {role_info['command']} <目标号码>"
+                    if role == "magician":
+                        message += f"📝 使用命令: /wwg {role_info['command']} <号码1> <号码2>\n"
+                        message += f"💡 示例: /wwg swap 3 5 （交换3号和5号）"
+                    elif role == "cupid":
+                        message += f"📝 使用命令: /wwg {role_info['command']} <号码1> <号码2>\n"
+                        message += f"💡 示例: /wwg choose 2 4 （选择2号和4号成为情侣）"
+                    else:
+                        message += f"📝 使用命令: /wwg {role_info['command']} <目标号码>\n"
+                        message += f"💡 示例: /wwg check 3 （查验3号玩家）"
                 
                 await MessageSender.send_private_message(player_qq, message)
             
-            await self.send_text("🎮 游戏开始！角色信息已私聊发送给所有玩家")
             return True, "游戏开始", True
         else:
             await self.send_text("❌ 开始游戏失败，玩家数量不足或角色分配错误")
@@ -1719,12 +1814,16 @@ class WerewolfGameCommand(BaseCommand):
         game = self.game_manager.games[room_id]
         player = game["players"].get(user_id)
         
-        if not player or player["status"] != PlayerStatus.ALIVE.value:
-            await self.send_text("❌ 你已出局或不在游戏中")
+        if not player:
+            await self.send_text("❌ 你不在游戏中")
+            return False, "玩家不在游戏中", True
+        
+        if player["status"] != PlayerStatus.ALIVE.value:
+            await self.send_text("❌ 你已出局，无法执行行动")
             return False, "玩家已出局", True
         
         # 检查游戏阶段
-        current_phase = GamePhase(game["phase"])
+        current_phase = game["phase"]
         
         # 女巫解药阶段特殊处理
         if current_phase == GamePhase.WITCH_SAVE_PHASE.value:
@@ -1759,7 +1858,7 @@ class WerewolfGameCommand(BaseCommand):
                 return False, "猎人阶段错误命令", True
         
         else:
-            await self.send_text("❌ 当前阶段不能执行此命令")
+            await self.send_text(f"❌ 当前阶段不能执行此命令（当前阶段: {self._get_phase_display_name(current_phase)}）")
             return False, "阶段错误", True
     
     async def _handle_night_action(self, game: Dict[str, Any], player: Dict[str, Any], action: str, args: str, room_id: str):
@@ -1793,13 +1892,28 @@ class WerewolfGameCommand(BaseCommand):
                     await self.send_text("❌ 请提供目标号码，格式: /wwg poison <号码>")
                     return False, "女巫毒药缺少目标", True
                 
-                game["night_actions"]["witch_poison"] = args
-                player["has_acted"] = True
-                self.game_manager.last_activity[room_id] = time.time()
-                self.game_manager._save_game_file(room_id)
-                
-                await self.send_text(f"✅ 已记录毒药目标: {args}")
-                return True, "女巫使用毒药", True
+                try:
+                    target_num = int(args)
+                    target_player = self._get_player_by_number(game, target_num)
+                    if not target_player or target_player["status"] != PlayerStatus.ALIVE.value:
+                        await self.send_text("❌ 目标玩家不存在或已出局")
+                        return False, "女巫毒药目标无效", True
+                    
+                    game["night_actions"]["witch_poison"] = args
+                    player["has_acted"] = True
+                    self.game_manager.last_activity[room_id] = time.time()
+                    self.game_manager._save_game_file(room_id)
+                    
+                    await self.send_text(f"✅ 已记录毒药目标: {args}号")
+                    
+                    # 检查是否需要进入女巫解药阶段
+                    await self.game_processor.process_night_actions(room_id)
+                    
+                    return True, "女巫使用毒药", True
+                    
+                except ValueError:
+                    await self.send_text("❌ 目标号码必须是数字")
+                    return False, "女巫毒药目标非数字", True
         
         # 其他角色行动
         else:
@@ -1807,19 +1921,52 @@ class WerewolfGameCommand(BaseCommand):
                 await self.send_text(f"❌ 请提供目标号码，格式: /wwg {action} <号码>")
                 return False, f"{role}缺少目标", True
             
-            action_key = self._get_role_action_key(role)
-            game["night_actions"][action_key] = args
-            player["has_acted"] = True
-            self.game_manager.last_activity[room_id] = time.time()
-            self.game_manager._save_game_file(room_id)
-            
-            await self.send_text(f"✅ 行动已记录: {action} {args}")
-            
-            # 检查是否需要进入女巫解药阶段
-            if role != "witch":  # 避免重复处理
+            try:
+                # 特殊命令处理
+                if action == "swap" or action == "choose":
+                    parts = args.split()
+                    if len(parts) < 2:
+                        await self.send_text(f"❌ 请提供两个号码，格式: /wwg {action} <号码1> <号码2>")
+                        return False, f"{role}缺少目标", True
+                    
+                    target1 = int(parts[0])
+                    target2 = int(parts[1])
+                    
+                    target_player1 = self._get_player_by_number(game, target1)
+                    target_player2 = self._get_player_by_number(game, target2)
+                    
+                    if not target_player1 or target_player1["status"] != PlayerStatus.ALIVE.value:
+                        await self.send_text("❌ 第一个目标玩家不存在或已出局")
+                        return False, f"{role}目标1无效", True
+                    if not target_player2 or target_player2["status"] != PlayerStatus.ALIVE.value:
+                        await self.send_text("❌ 第二个目标玩家不存在或已出局")
+                        return False, f"{role}目标2无效", True
+                    
+                    game["night_actions"][self._get_role_action_key(role)] = f"{target1} {target2}"
+                    
+                else:
+                    target_num = int(args)
+                    target_player = self._get_player_by_number(game, target_num)
+                    if not target_player or target_player["status"] != PlayerStatus.ALIVE.value:
+                        await self.send_text("❌ 目标玩家不存在或已出局")
+                        return False, f"{role}目标无效", True
+                    
+                    game["night_actions"][self._get_role_action_key(role)] = args
+                
+                player["has_acted"] = True
+                self.game_manager.last_activity[room_id] = time.time()
+                self.game_manager._save_game_file(room_id)
+                
+                await self.send_text(f"✅ 行动已记录: {action} {args}")
+                
+                # 检查是否需要进入女巫解药阶段
                 await self.game_processor.process_night_actions(room_id)
-            
-            return True, f"{role}行动记录", True
+                
+                return True, f"{role}行动记录", True
+                
+            except ValueError:
+                await self.send_text("❌ 目标号码必须是数字")
+                return False, f"{role}目标非数字", True
         
         return False, "未处理行动", True
     
@@ -1833,13 +1980,25 @@ class WerewolfGameCommand(BaseCommand):
             await self.send_text("❌ 请提供目标号码，格式: /wwg save <号码>")
             return False, "女巫解药缺少目标", True
         
-        game["night_actions"]["witch_save"] = args
-        self.game_manager.last_activity[room_id] = time.time()
-        self.game_manager._save_game_file(room_id)
-        
-        # 处理女巫解药阶段
-        await self.game_processor.process_witch_save_phase(room_id)
-        return True, "女巫使用解药", True
+        try:
+            target_num = int(args)
+            # 检查目标是否在候选列表中
+            candidate_numbers = [num for num, _ in game["witch_save_candidates"]]
+            if target_num not in candidate_numbers:
+                await self.send_text("❌ 目标不在可拯救的玩家列表中")
+                return False, "女巫解药目标无效", True
+            
+            game["night_actions"]["witch_save"] = args
+            self.game_manager.last_activity[room_id] = time.time()
+            self.game_manager._save_game_file(room_id)
+            
+            # 处理女巫解药阶段
+            await self.game_processor.process_witch_save_phase(room_id)
+            return True, "女巫使用解药", True
+            
+        except ValueError:
+            await self.send_text("❌ 目标号码必须是数字")
+            return False, "女巫解药目标非数字", True
     
     async def _handle_witch_skip_action(self, game: Dict[str, Any], player: Dict[str, Any], room_id: str):
         """处理女巫跳过解药行动"""
@@ -1863,6 +2022,11 @@ class WerewolfGameCommand(BaseCommand):
         
         try:
             vote_target = int(args)
+            target_player = self._get_player_by_number(game, vote_target)
+            if not target_player or target_player["status"] != PlayerStatus.ALIVE.value:
+                await self.send_text("❌ 目标玩家不存在或已出局")
+                return False, "投票目标无效", True
+            
             game["votes"][player["qq"]] = vote_target
             self.game_manager.last_activity[room_id] = time.time()
             self.game_manager._save_game_file(room_id)

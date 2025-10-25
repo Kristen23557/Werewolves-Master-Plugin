@@ -1922,10 +1922,10 @@ class WerewolfGameCommand(BaseCommand):
 class WerewolfGamePlugin(BasePlugin):
     """狼人杀游戏插件"""
     
-    plugin_name = "werewolf_game_plugin"
+    plugin_name = "Werewolves-Master-Plugin"
     plugin_description = "纯指令驱动的狼人杀游戏插件"
     plugin_version = "1.0.0"
-    plugin_author = "Assistant"
+    plugin_author = "KArabella"
     enable_plugin = True
     dependencies = []
     python_dependencies = []

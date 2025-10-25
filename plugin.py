@@ -1581,7 +1581,7 @@ class WerewolfGameCommand(BaseCommand):
         
         # 构建状态信息
         status_text = f"📊 房间状态 - {room_id}\n"
-        status_text += f"👤 房主: {self._get_user_nickname(game['host'])}\n"
+        status_text += f"👤 房主: {self._get_qq_nickname(game['host'])}\n"
         status_text += f"🎯 玩家: {len(game['players'])}/{game['settings']['player_count']}\n"
         status_text += f"📝 游戏阶段: {self._get_phase_display_name(game['phase'])}\n\n"
         
@@ -1590,7 +1590,9 @@ class WerewolfGameCommand(BaseCommand):
         for player in game["players"].values():
             status_icon = "💚" if player["status"] == PlayerStatus.ALIVE.value else "💀"
             role_display = "???" if game["phase"] in [GamePhase.SETUP.value, GamePhase.NIGHT.value, GamePhase.DAY.value] else ROLES[player["original_role"]]["name"]
-            status_text += f"  {player['number']}号 - {self._get_user_nickname(player['qq'])} {status_icon} ({role_display})\n"
+            # 使用QQ号获取昵称
+            player_nickname = self._get_qq_nickname(player['qq'])
+            status_text += f"  {player['number']}号 - {player_nickname} {status_icon} ({role_display})\n"
         
         status_text += "\n🎭 角色设置:\n"
         for role_id, count in game["settings"]["roles"].items():
@@ -1641,6 +1643,47 @@ class WerewolfGameCommand(BaseCommand):
                 return profile["name"]
             return f"玩家{user_id}"
     
+    def _get_qq_nickname(self, qq_number: str) -> str:
+        """通过QQ号获取用户昵称"""
+        try:
+            # 导入必要的API
+            from src.plugin_system.apis import person_api
+            
+            # 使用person_api获取用户信息
+            person_id = person_api.get_person_id("qq", int(qq_number))
+            
+            # 由于get_person_value是异步的，我们需要在同步上下文中运行它
+            import asyncio
+            try:
+                # 尝试获取现有的事件循环
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果没有事件循环，创建一个新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # 在事件循环中运行异步函数获取昵称
+            nickname = loop.run_until_complete(
+                person_api.get_person_value(person_id, "nickname")
+            )
+            
+            if nickname:
+                return nickname
+            else:
+                # 如果获取不到昵称，使用档案中的名称
+                profile = self.game_manager.player_profiles.get(qq_number)
+                if profile and profile.get("name"):
+                    return profile["name"]
+                return f"玩家{qq_number}"
+                
+        except Exception as e:
+            print(f"获取QQ昵称失败 {qq_number}: {e}")
+            # 出错时使用档案中的名称
+            profile = self.game_manager.player_profiles.get(qq_number)
+            if profile and profile.get("name"):
+                return profile["name"]
+            return f"玩家{qq_number}"
+
     def _get_phase_display_name(self, phase: str) -> str:
         """获取阶段显示名称"""
         phase_names = {

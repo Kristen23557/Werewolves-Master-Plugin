@@ -1,20 +1,18 @@
 {
-  "manifest_version": 1,
-  "name": "Werewolves-Master-Plugin",
-  "version": "1.0.0",
-  "description": "让麦麦帮你开展惊险刺激（并不）的狼人杀游戏！",
-  "author": {
-    "name": "KArabella",
-    "url": "https://github.com/Kristen23557"
-  },
-  "license": "MPL-2.0",
-  "host_application": {
-    "min_version": "0.10.0",
-    "max_version": "0.10.3"
-  },
-  "keywords": ["minigame", "llm offline","divination","moderation"],
-  "categories": ["Entertainment & Interaction"],
-  "repository_url": "https://github.com/Kristen23557/Werewolves-Master-Plugin",
-  "default_locale": "zh-CN",
-  "locales_path": "_locales"
+    "manifest_version": 1,
+    "name": "MaiBot-Tarots-Plugin-REBORN",
+    "version": "1.0.0",
+    "description": "让麦麦帮你开展惊险刺激（并不）的狼人杀游戏！",
+    "host_application": {
+        "min_version": "0.10.0"
+    },
+    "author": {
+        "name": "KArabella",
+        "url": "https://github.com/Kristen23557"
+    },
+    "license": "MPL-2.0",
+    "homepage_url": "https://github.com/Kristen23557",
+    "repository_url": "https://github.com/Kristen23557/Werewolves-Master-Plugin",
+    
+    "default_locale": "CN"
 }

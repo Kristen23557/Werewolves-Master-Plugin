@@ -46,20 +46,6 @@ class Camp(Enum):
     THIRD_PARTY = "third_party"
     LOVER = "lover"
 
-class ActionType(Enum):
-    SEER_CHECK = "seer_check"
-    WITCH_SAVE = "witch_save"
-    WITCH_POISON = "witch_poison"
-    WOLF_KILL = "wolf_kill"
-    GUARD_PROTECT = "guard_protect"
-    MAGICIAN_SWAP = "magician_swap"
-    SPIRITUALIST_CHECK = "spiritualist_check"
-    CUPID_CHOOSE = "cupid_choose"
-    PAINTER_DISGUISE = "painter_disguise"
-    VOTE = "vote"
-    HUNTER_SHOOT = "hunter_shoot"
-    WHITE_WOLF_EXPLODE = "white_wolf_explode"
-
 class WitchStatus(Enum):
     HAS_BOTH = "has_both"
     HAS_SAVE_ONLY = "has_save_only"
@@ -256,8 +242,8 @@ class WerewolfGameManager:
             self._save_profile(qq)
         return self.player_profiles[qq]
     
-    def create_game(self, room_id: str, host_qq: str, group_id: str) -> Dict[str, Any]:
-        """创建新游戏"""
+    def create_game(self, room_id: str, host_qq: str, group_id: str, host_name: str) -> Dict[str, Any]:
+        """创建新游戏并自动加入房主"""
         game = {
             "room_id": room_id,
             "host": host_qq,
@@ -307,6 +293,25 @@ class WerewolfGameManager:
             "winner": None,
             "game_code": None
         }
+        
+        # 自动加入房主
+        self.get_or_create_profile(host_qq, host_name)
+        game["players"][host_qq] = {
+            "name": host_name,
+            "qq": host_qq,
+            "number": 1,
+            "role": None,
+            "original_role": None,
+            "status": PlayerStatus.ALIVE.value,
+            "death_reason": None,
+            "killer": None,
+            "has_acted": False,
+            "is_lover": False,
+            "lover_partner": None,
+            "inherited_skill": None
+        }
+        game["player_order"].append(host_qq)
+        
         self.games[room_id] = game
         self.last_activity[room_id] = time.time()
         self._save_game_file(room_id)
@@ -345,6 +350,27 @@ class WerewolfGameManager:
         
         self.last_activity[room_id] = time.time()
         self._save_game_file(room_id)
+        return True
+    
+    def destroy_game(self, room_id: str) -> bool:
+        """销毁房间"""
+        if room_id not in self.games:
+            return False
+        
+        # 删除游戏文件
+        games_dir = os.path.join(os.path.dirname(__file__), "games")
+        file_path = os.path.join(games_dir, f"{room_id}.json")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"删除游戏文件失败: {e}")
+        
+        # 从内存中移除
+        del self.games[room_id]
+        if room_id in self.last_activity:
+            del self.last_activity[room_id]
+        
         return True
     
     def start_game(self, room_id: str) -> bool:
@@ -387,8 +413,11 @@ class WerewolfGameManager:
         os.makedirs(games_dir, exist_ok=True)
         
         file_path = os.path.join(games_dir, f"{room_id}.json")
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(game, f, ensure_ascii=False, indent=2)
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(game, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存游戏文件失败: {e}")
     
     def archive_game(self, room_id: str):
         """归档游戏"""
@@ -466,8 +495,11 @@ class WerewolfGameManager:
         source_file = os.path.join(games_dir, f"{room_id}.json")
         target_file = os.path.join(finished_dir, f"{game_code}.json")
         
-        if os.path.exists(source_file):
-            os.rename(source_file, target_file)
+        try:
+            if os.path.exists(source_file):
+                os.rename(source_file, target_file)
+        except Exception as e:
+            print(f"移动游戏文件失败: {e}")
         
         # 从内存中移除
         del self.games[room_id]
@@ -724,7 +756,11 @@ class GameLogicProcessor:
         
         # 解析选择的两个玩家
         try:
-            player1_num, player2_num = map(int, cupid_action.split())
+            parts = cupid_action.split()
+            if len(parts) < 2:
+                return
+                
+            player1_num, player2_num = map(int, parts[:2])
             
             player1 = self._get_player_by_number(game, player1_num)
             player2 = self._get_player_by_number(game, player2_num)
@@ -744,7 +780,7 @@ class GameLogicProcessor:
                 await self._send_private_message(game, player2["qq"],
                                                f"💕 你与玩家 {player1_num} 号 {player1['name']} 成为情侣！")
                 
-        except ValueError:
+        except (ValueError, IndexError):
             pass
     
     async def _process_guard_action(self, game: Dict[str, Any], room_id: str):
@@ -898,7 +934,11 @@ class GameLogicProcessor:
             return
         
         try:
-            num1, num2 = map(int, magician_action.split())
+            parts = magician_action.split()
+            if len(parts) < 2:
+                return
+                
+            num1, num2 = map(int, parts[:2])
             player1 = self._get_player_by_number(game, num1)
             player2 = self._get_player_by_number(game, num2)
             
@@ -908,7 +948,7 @@ class GameLogicProcessor:
                 if magician_player:
                     await self._send_private_message(game, magician_player["qq"],
                                                    f"🎭 你交换了玩家 {num1} 号和 {num2} 号的号码牌")
-        except ValueError:
+        except (ValueError, IndexError):
             pass
     
     async def _process_painter_action(self, game: Dict[str, Any], room_id: str):
@@ -1187,8 +1227,10 @@ class WerewolfGameCommand(BaseCommand):
     command_help = (
         "🐺 狼人杀游戏命令帮助 🐺\n"
         "/wwg - 显示帮助\n"
-        "/wwg host - 创建房间\n"
+        "/wwg host - 创建房间并自动加入\n"
         "/wwg join <房间号> - 加入房间\n"
+        "/wwg status - 查看房间状态\n"
+        "/wwg destroy - 销毁房间（仅房主）\n"
         "/wwg settings players <数量> - 设置玩家数(6-18)\n"
         "/wwg settings roles <角色> <数量> - 设置角色数量\n"
         "/wwg start - 开始游戏\n"
@@ -1219,9 +1261,14 @@ class WerewolfGameCommand(BaseCommand):
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行命令"""
         try:
+            # 安全获取匹配组
             matched_groups = self.matched_groups or {}
-            subcommand = matched_groups.get("subcommand", "").lower()
-            args = matched_groups.get("args", "").lower()
+            subcommand = matched_groups.get("subcommand")
+            args = matched_groups.get("args")
+            
+            # 安全处理None值
+            subcommand = subcommand.lower() if subcommand else ""
+            args = args or ""
             
             # 更新活动时间
             self._update_activity()
@@ -1232,6 +1279,10 @@ class WerewolfGameCommand(BaseCommand):
                 return await self._host_game()
             elif subcommand == "join":
                 return await self._join_game(args)
+            elif subcommand == "status":
+                return await self._show_status()
+            elif subcommand == "destroy":
+                return await self._destroy_game()
             elif subcommand == "settings":
                 return await self._handle_settings(args)
             elif subcommand == "start":
@@ -1258,8 +1309,9 @@ class WerewolfGameCommand(BaseCommand):
         return True, "显示帮助", True
     
     async def _host_game(self):
-        """创建房间"""
+        """创建房间并自动加入房主"""
         user_id = self.message.message_info.user_info.user_id
+        user_name = "玩家"  # 实际应该获取用户昵称
         group_info = self.message.message_info.group_info
         
         if not group_info:
@@ -1271,15 +1323,16 @@ class WerewolfGameCommand(BaseCommand):
         # 生成房间号
         room_id = f"WWG{int(time.time()) % 1000000:06d}"
         
-        game = self.game_manager.create_game(room_id, str(user_id), str(group_id))
+        game = self.game_manager.create_game(room_id, str(user_id), str(group_id), user_name)
         
         if game:
             await self.send_text(
                 f"🎮 狼人杀房间创建成功！\n"
                 f"📍 房间号: {room_id}\n"
-                f"👤 房主: {user_id}\n"
-                f"🎯 玩家数: 0/{game['settings']['player_count']}\n"
-                f"💡 使用 /wwg join {room_id} 加入游戏"
+                f"👤 房主: {user_id} (已自动加入)\n"
+                f"🎯 当前玩家: 1/{game['settings']['player_count']}\n"
+                f"💡 使用 /wwg join {room_id} 加入游戏\n"
+                f"📊 使用 /wwg status 查看房间状态"
             )
             return True, f"创建房间 {room_id}", True
         else:
@@ -1310,6 +1363,64 @@ class WerewolfGameCommand(BaseCommand):
         else:
             await self.send_text("❌ 加入房间失败，可能房间已满或不存在")
             return False, "加入房间失败", True
+    
+    async def _show_status(self):
+        """显示房间状态"""
+        user_id = self.message.message_info.user_info.user_id
+        
+        # 查找用户所在的游戏
+        room_id = self._find_user_game(str(user_id))
+        if not room_id:
+            await self.send_text("❌ 你不在任何游戏中")
+            return False, "用户不在游戏中", True
+        
+        game = self.game_manager.games[room_id]
+        
+        # 构建状态信息
+        status_text = f"📊 房间状态 - {room_id}\n"
+        status_text += f"👤 房主: {game['host']}\n"
+        status_text += f"🎯 玩家: {len(game['players'])}/{game['settings']['player_count']}\n"
+        status_text += f"📝 游戏阶段: {game['phase']}\n\n"
+        
+        # 玩家列表
+        status_text += "👥 当前玩家:\n"
+        for player in game["players"].values():
+            status_text += f"  {player['number']}号 - {player['name']} (QQ: {player['qq']})\n"
+        
+        status_text += "\n🎭 角色设置:\n"
+        for role_id, count in game["settings"]["roles"].items():
+            if count > 0:
+                role_name = ROLES[role_id]["name"]
+                status_text += f"  {role_name} ({role_id}): {count}个\n"
+        
+        await self.send_text(status_text)
+        return True, "显示房间状态", True
+    
+    async def _destroy_game(self):
+        """销毁房间"""
+        user_id = self.message.message_info.user_info.user_id
+        
+        # 查找用户所在的游戏
+        room_id = self._find_user_game(str(user_id))
+        if not room_id:
+            await self.send_text("❌ 你不在任何游戏中")
+            return False, "用户不在游戏中", True
+        
+        game = self.game_manager.games[room_id]
+        
+        # 检查房主权限
+        if game["host"] != str(user_id):
+            await self.send_text("❌ 只有房主可以销毁房间")
+            return False, "非房主销毁房间", True
+        
+        success = self.game_manager.destroy_game(room_id)
+        
+        if success:
+            await self.send_text(f"🗑️ 房间 {room_id} 已销毁，所有玩家已离开")
+            return True, f"销毁房间 {room_id}", True
+        else:
+            await self.send_text("❌ 销毁房间失败")
+            return False, "销毁房间失败", True
     
     async def _handle_settings(self, args):
         """处理设置命令"""
@@ -1379,7 +1490,7 @@ class WerewolfGameCommand(BaseCommand):
                 self.game_manager._save_game_file(room_id)
                 
                 role_name = ROLES[role_key]["name"]
-                await self.send_text(f"✅ 设置 {role_name} 数量为: {role_count}")
+                await self.send_text(f"✅ 设置 {role_name} ({role_key}) 数量为: {role_count}")
                 return True, f"设置 {role_key} 数量为 {role_count}", True
                 
             except ValueError:
@@ -1811,10 +1922,10 @@ class WerewolfGameCommand(BaseCommand):
 class WerewolfGamePlugin(BasePlugin):
     """狼人杀游戏插件"""
     
-    plugin_name = "Werewolves-Master-Plugin"
+    plugin_name = "werewolf_game_plugin"
     plugin_description = "纯指令驱动的狼人杀游戏插件"
     plugin_version = "1.0.0"
-    plugin_author = "KArabella"
+    plugin_author = "Assistant"
     enable_plugin = True
     dependencies = []
     python_dependencies = []

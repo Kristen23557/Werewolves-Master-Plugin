@@ -1448,6 +1448,10 @@ class WerewolfGameCommand(BaseCommand):
             subcommand = subcommand.lower() if subcommand else ""
             args = args or ""
             
+            # 特殊处理destroy命令，确保它被正确路由
+            if subcommand == "destroy":
+                return await self._destroy_game()
+            
             if not subcommand:
                 return await self._show_help()
             elif subcommand == "host":
@@ -1456,8 +1460,6 @@ class WerewolfGameCommand(BaseCommand):
                 return await self._join_game(args)
             elif subcommand == "status":
                 return await self._show_status()
-            elif subcommand == "destroy":
-                return await self._destroy_game()
             elif subcommand == "settings":
                 return await self._handle_settings(args)
             elif subcommand == "start":
@@ -1467,7 +1469,6 @@ class WerewolfGameCommand(BaseCommand):
             elif subcommand == "archive":
                 return await self._show_archive(args)
             elif subcommand == "test_private":
-                # 直接处理测试命令，而不是创建新的实例
                 return await self._handle_test_private(args)
             else:
                 # 游戏内行动命令

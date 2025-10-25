@@ -14,7 +14,7 @@ from src.plugin_system import (
     ComponentInfo,
     ConfigField
 )
-from src.plugin_system.apis import send_api
+from src.plugin_system.apis import send_api, chat_api
 
 # ==================== 枚举定义 ====================
 class GamePhase(Enum):
@@ -183,6 +183,66 @@ ROLES = {
         "description": "游戏第一晚，选择两名玩家成为情侣"
     }
 }
+
+# ==================== 消息发送工具类 ====================
+class MessageSender:
+    """消息发送工具类，封装正确的API调用方式"""
+    
+    @staticmethod
+    async def send_private_message(user_id: str, message: str) -> bool:
+        """发送私聊消息"""
+        try:
+            # 获取用户的私聊流
+            stream = chat_api.get_stream_by_user_id(user_id, "qq")
+            if not stream:
+                print(f"❌ 未找到用户 {user_id} 的私聊流")
+                return False
+            
+            # 使用正确的API发送消息
+            success = await send_api.text_to_stream(
+                text=message,
+                stream_id=stream.stream_id,
+                storage_message=True
+            )
+            
+            if success:
+                print(f"✅ 私聊消息发送成功: {user_id}")
+            else:
+                print(f"❌ 私聊消息发送失败: {user_id}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ 发送私聊消息异常: {e}")
+            return False
+    
+    @staticmethod
+    async def send_group_message(group_id: str, message: str) -> bool:
+        """发送群聊消息"""
+        try:
+            # 获取群聊流
+            stream = chat_api.get_stream_by_group_id(group_id, "qq")
+            if not stream:
+                print(f"❌ 未找到群组 {group_id} 的聊天流")
+                return False
+            
+            # 使用正确的API发送消息
+            success = await send_api.text_to_stream(
+                text=message,
+                stream_id=stream.stream_id,
+                storage_message=True
+            )
+            
+            if success:
+                print(f"✅ 群聊消息发送成功: {group_id}")
+            else:
+                print(f"❌ 群聊消息发送失败: {group_id}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ 发送群聊消息异常: {e}")
+            return False
 
 # ==================== 游戏管理器 ====================
 class WerewolfGameManager:
@@ -1168,30 +1228,12 @@ class GameLogicProcessor:
         return action_keys.get(role, "")
     
     async def _send_private_message(self, game: Dict[str, Any], qq: str, message: str):
-        """发送私聊消息"""
-        try:
-            success = await send_api.text_to_user(
-                text=message,
-                user_id=str(qq),
-                platform="qq"
-            )
-            return success
-        except Exception as e:
-            print(f"发送私聊消息失败: {e}")
-            return False
+        """发送私聊消息 - 使用正确的API"""
+        return await MessageSender.send_private_message(qq, message)
     
     async def _send_group_message(self, game: Dict[str, Any], message: str):
-        """发送群聊消息"""
-        try:
-            success = await send_api.text_to_group(
-                text=message,
-                group_id=game["group_id"],
-                platform="qq"
-            )
-            return success
-        except Exception as e:
-            print(f"发送群聊消息失败: {e}")
-            return False
+        """发送群聊消息 - 使用正确的API"""
+        return await MessageSender.send_group_message(game["group_id"], message)
     
     async def _send_night_start_message(self, game: Dict[str, Any], room_id: str):
         """发送夜晚开始消息"""
@@ -1218,6 +1260,39 @@ class GameLogicProcessor:
         message = f"☀️ 第 {game['day_count']} 天开始！请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。"
         await self._send_group_message(game, message)
 
+# ==================== 测试命令 ====================
+class TestPrivateMessageCommand(BaseCommand):
+    """测试私聊消息发送命令"""
+    
+    command_name = "test_private"
+    command_description = "测试向指定QQ号发送私聊消息"
+    command_pattern = r"^/wwg test_private\s+(?P<qq>\d+)(?:\s+(?P<message>.+))?$"
+    command_help = "用法: /wwg test_private <QQ号> [消息内容]"
+
+    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+        """执行测试私聊命令"""
+        try:
+            qq = self.matched_groups.get("qq", "").strip()
+            message = self.matched_groups.get("message", "这是一条测试私聊消息").strip()
+            
+            if not qq:
+                await self.send_text("❌ 请提供QQ号")
+                return False, "缺少QQ号", True
+            
+            # 使用MessageSender发送私聊消息
+            success = await MessageSender.send_private_message(qq, f"🐺 狼人杀插件测试消息:\n{message}")
+            
+            if success:
+                await self.send_text(f"✅ 测试私聊消息已发送到 {qq}")
+                return True, f"测试消息发送成功: {qq}", True
+            else:
+                await self.send_text(f"❌ 向 {qq} 发送测试消息失败，请检查QQ号是否正确或是否有私聊权限")
+                return False, f"测试消息发送失败: {qq}", True
+                
+        except Exception as e:
+            await self.send_text(f"❌ 测试命令执行出错: {str(e)}")
+            return False, f"测试命令出错: {str(e)}", True
+
 # ==================== 主命令处理器 ====================
 class WerewolfGameCommand(BaseCommand):
     """狼人杀游戏命令"""
@@ -1237,6 +1312,7 @@ class WerewolfGameCommand(BaseCommand):
         "/wwg start - 开始游戏\n"
         "/wwg profile [QQ号] - 查看游戏档案\n"
         "/wwg archive <对局码> - 查询对局记录\n"
+        "/wwg test_private <QQ号> [消息] - 测试私聊消息发送\n"
         "\n🎮 游戏内命令:\n"
         "/wwg check <号码> - 预言家查验\n"
         "/wwg save <号码> - 女巫使用解药\n"
@@ -1271,9 +1347,6 @@ class WerewolfGameCommand(BaseCommand):
             subcommand = subcommand.lower() if subcommand else ""
             args = args or ""
             
-            # 更新活动时间
-            self._update_activity()
-            
             if not subcommand:
                 return await self._show_help()
             elif subcommand == "host":
@@ -1292,6 +1365,9 @@ class WerewolfGameCommand(BaseCommand):
                 return await self._show_profile(args)
             elif subcommand == "archive":
                 return await self._show_archive(args)
+            elif subcommand == "test_private":
+                # 直接处理测试命令，而不是创建新的实例
+                return await self._handle_test_private(args)
             else:
                 # 游戏内行动命令
                 return await self._handle_game_action(subcommand, args)
@@ -1300,9 +1376,34 @@ class WerewolfGameCommand(BaseCommand):
             await self.send_text(f"❌ 命令执行出错: {str(e)}")
             return False, f"命令执行出错: {str(e)}", True
     
-    def _update_activity(self):
-        """更新活动时间 - 简化实现"""
-        pass
+    async def _handle_test_private(self, args: str):
+        """处理测试私聊命令"""
+        try:
+            parts = args.split(maxsplit=1)
+            if not parts:
+                await self.send_text("❌ 请提供QQ号，格式: /wwg test_private <QQ号> [消息]")
+                return False, "缺少QQ号", True
+            
+            qq = parts[0].strip()
+            message = parts[1].strip() if len(parts) > 1 else "这是一条测试私聊消息"
+            
+            if not qq:
+                await self.send_text("❌ 请提供QQ号")
+                return False, "缺少QQ号", True
+            
+            # 使用MessageSender发送私聊消息
+            success = await MessageSender.send_private_message(qq, f"🐺 狼人杀插件测试消息:\n{message}")
+            
+            if success:
+                await self.send_text(f"✅ 测试私聊消息已发送到 {qq}")
+                return True, f"测试消息发送成功: {qq}", True
+            else:
+                await self.send_text(f"❌ 向 {qq} 发送测试消息失败，请检查QQ号是否正确或是否有私聊权限")
+                return False, f"测试消息发送失败: {qq}", True
+                
+        except Exception as e:
+            await self.send_text(f"❌ 测试命令执行出错: {str(e)}")
+            return False, f"测试命令出错: {str(e)}", True
     
     async def _show_help(self):
         """显示帮助"""
@@ -1547,7 +1648,7 @@ class WerewolfGameCommand(BaseCommand):
                 if role_info["command"]:
                     message += f"使用命令: /wwg {role_info['command']} <目标号码>"
                 
-                await self._send_private_message(game, player_qq, message)
+                await MessageSender.send_private_message(player_qq, message)
             
             await self.send_text("🎮 游戏开始！角色信息已私聊发送给所有玩家")
             return True, "游戏开始", True
@@ -1888,30 +1989,12 @@ class WerewolfGameCommand(BaseCommand):
         return action_keys.get(role, "")
     
     async def _send_private_message(self, game: Dict[str, Any], qq: str, message: str):
-        """发送私聊消息"""
-        try:
-            success = await send_api.text_to_user(
-                text=message,
-                user_id=str(qq),
-                platform="qq"
-            )
-            return success
-        except Exception as e:
-            print(f"发送私聊消息失败: {e}")
-            return False
+        """发送私聊消息 - 使用正确的API"""
+        return await MessageSender.send_private_message(qq, message)
     
     async def _send_group_message(self, game: Dict[str, Any], message: str):
-        """发送群聊消息"""
-        try:
-            success = await send_api.text_to_group(
-                text=message,
-                group_id=game["group_id"],
-                platform="qq"
-            )
-            return success
-        except Exception as e:
-            print(f"发送群聊消息失败: {e}")
-            return False
+        """发送群聊消息 - 使用正确的API"""
+        return await MessageSender.send_group_message(game["group_id"], message)
     
     async def _send_night_start_message(self, game: Dict[str, Any], room_id: str):
         """发送夜晚开始消息"""
@@ -1978,5 +2061,6 @@ class WerewolfGamePlugin(BasePlugin):
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         """返回插件组件"""
         return [
-            (WerewolfGameCommand.get_command_info(), WerewolfGameCommand)
+            (WerewolfGameCommand.get_command_info(), WerewolfGameCommand),
+            (TestPrivateMessageCommand.get_command_info(), TestPrivateMessageCommand)
         ]

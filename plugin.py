@@ -1670,19 +1670,13 @@ class WerewolfGameCommand(BaseCommand):
             if nickname:
                 return nickname
             else:
-                # 如果获取不到昵称，使用档案中的名称
-                profile = self.game_manager.player_profiles.get(qq_number)
-                if profile and profile.get("name"):
-                    return profile["name"]
-                return f"玩家{qq_number}"
+                # 如果获取不到昵称，显示QQ号前五位
+                return f"玩家{qq_number[:5]}"
                 
         except Exception as e:
             print(f"获取QQ昵称失败 {qq_number}: {e}")
-            # 出错时使用档案中的名称
-            profile = self.game_manager.player_profiles.get(qq_number)
-            if profile and profile.get("name"):
-                return profile["name"]
-            return f"玩家{qq_number}"
+            # 出错时显示QQ号前五位
+            return f"玩家{qq_number[:5]}"
 
     def _get_phase_display_name(self, phase: str) -> str:
         """获取阶段显示名称"""

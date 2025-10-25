@@ -1327,6 +1327,7 @@ class WerewolfGameCommand(BaseCommand):
         "/wwg shoot <号码> - 猎人开枪\n"
         "/wwg explode <号码> - 白狼王自爆\n"
         "/wwg skip - 跳过行动\n"
+        "请所有玩家确认：你已经添加了机器人的私聊好友并且和她有过消息来往才可使用插件进行游戏"
     )
     intercept_message = True
     

@@ -1512,7 +1512,22 @@ class WerewolfGameCommand(BaseCommand):
         return True, "显示帮助", True
     
     async def _host_game(self):
+        
         """创建房间并自动加入房主"""
+        user_id = self.message.message_info.user_info.user_id
+        
+        # 检查玩家是否有未完成的游戏
+        if self._has_unfinished_game(str(user_id)):
+            await self.send_text("❌ 你已有未完成的游戏，请先完成当前游戏或销毁房间")
+            return False, "玩家有未完成游戏", True
+        
+        user_name = self._get_user_nickname(user_id)
+        group_info = self.message.message_info.group_info
+        
+        if not group_info:
+            await self.send_text("❌ 请在群聊中创建游戏房间")
+            return False, "非群聊环境", True
+
         user_id = self.message.message_info.user_info.user_id
         user_name = self._get_user_nickname(user_id)
         group_info = self.message.message_info.group_info
@@ -1550,6 +1565,12 @@ class WerewolfGameCommand(BaseCommand):
         
         room_id = args.strip()
         user_id = self.message.message_info.user_info.user_id
+        
+        # 检查玩家是否有未完成的游戏
+        if self._has_unfinished_game(str(user_id)):
+            await self.send_text("❌ 你已有未完成的游戏，请先完成当前游戏或销毁房间")
+            return False, "玩家有未完成游戏", True
+        
         user_name = self._get_user_nickname(user_id)
         
         success = self.game_manager.join_game(room_id, str(user_id), user_name)
@@ -1603,6 +1624,13 @@ class WerewolfGameCommand(BaseCommand):
         await self.send_text(status_text)
         return True, "显示房间状态", True
     
+    def _has_unfinished_game(self, user_id: str) -> bool:
+        """检查玩家是否有未完成的游戏"""
+        for room_id, game in self.game_manager.games.items():
+            if user_id in game["players"] and game["phase"] != GamePhase.ENDED.value:
+                return True
+        return False
+
     def _get_user_nickname(self, user_id: str) -> str:
         """获取用户昵称"""
         try:
@@ -1692,7 +1720,7 @@ class WerewolfGameCommand(BaseCommand):
         return phase_names.get(phase, phase)
     
     async def _destroy_game(self):
-        """销毁房间"""
+        """销毁房间（任何阶段都可以）"""
         user_id = self.message.message_info.user_info.user_id
         
         # 查找用户所在的游戏

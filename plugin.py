@@ -1951,6 +1951,12 @@ class WerewolfGameCommand(BaseCommand):
         """处理游戏内行动命令"""
         user_id = str(self.message.message_info.user_info.user_id)
         
+        # 特殊处理：destroy命令不受游戏阶段限制
+        if action == "destroy":
+            return await self._destroy_game()
+        
+        user_id = str(self.message.message_info.user_info.user_id)
+
         # 查找用户所在的游戏
         room_id = self._find_user_game(user_id)
         if not room_id:

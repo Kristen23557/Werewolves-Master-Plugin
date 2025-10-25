@@ -62,6 +62,7 @@ ROLES = {
         "night_action": False,
         "day_action": False,
         "command": None
+        "description": "普通村民，没有特殊能力，通过推理找出狼人"
     },
     "seer": {
         "name": "预言家",

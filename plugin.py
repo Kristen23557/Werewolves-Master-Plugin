@@ -15,6 +15,7 @@ from src.plugin_system import (
     ConfigField
 )
 from src.plugin_system.apis import send_api, chat_api
+from src.plugin_system.apis import person_api
 
 # ==================== 枚举定义 ====================
 class GamePhase(Enum):
@@ -1603,20 +1604,41 @@ class WerewolfGameCommand(BaseCommand):
     def _get_user_nickname(self, user_id: str) -> str:
         """获取用户昵称"""
         try:
-            # 尝试从游戏管理器的玩家档案中获取
+            # 使用person_api获取用户昵称（同步方式）
+            person_id = person_api.get_person_id("qq", int(user_id))
+            
+            # 由于get_person_value是异步的，我们需要在同步上下文中运行它
+            # 这里创建一个简单的事件循环来运行异步函数
+            import asyncio
+            try:
+                # 尝试获取现有的事件循环
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果没有事件循环，创建一个新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # 在事件循环中运行异步函数
+            nickname = loop.run_until_complete(
+                person_api.get_person_value(person_id, "nickname")
+            )
+            
+            if nickname:
+                return nickname
+            
+            # 如果person_api获取失败，回退到游戏档案中的名称
             profile = self.game_manager.player_profiles.get(str(user_id))
             if profile and profile.get("name"):
                 return profile["name"]
             
-            # 如果档案中没有，尝试从消息中获取
-            if hasattr(self, 'message') and self.message:
-                user_info = self.message.message_info.user_info
-                if user_info and hasattr(user_info, 'nickname') and user_info.nickname:
-                    return user_info.nickname
-            
             # 最后返回默认名称
             return f"玩家{user_id}"
-        except:
+        except Exception as e:
+            print(f"获取用户昵称失败 {user_id}: {e}")
+            # 如果出现异常，使用档案中的名称或默认名称
+            profile = self.game_manager.player_profiles.get(str(user_id))
+            if profile and profile.get("name"):
+                return profile["name"]
             return f"玩家{user_id}"
     
     def _get_phase_display_name(self, phase: str) -> str:

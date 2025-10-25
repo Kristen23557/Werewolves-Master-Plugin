@@ -1551,7 +1551,15 @@ class WerewolfGameCommand(BaseCommand):
                 f"👤 房主: {user_name} (已自动加入)\n"
                 f"🎯 当前玩家: 1/{game['settings']['player_count']}\n"
                 f"💡 使用 /wwg join {room_id} 加入游戏\n"
-                f"📊 使用 /wwg status 查看房间状态"
+                f"📊 使用 /wwg status 查看房间状态\n"
+                f"可用角色码\n"
+                f"🏠 村庄阵营 (VILLAGE)\n"
+                f"villager - 村民\seer - 预言家\witch - 女巫\hunter - 猎人\n"
+                f"guard - 守卫\magician - 魔术师\spiritualist - 通灵师\successor - 继承者\n"
+                f"🐺 狼人阵营 (WOLF)\n"
+                f"wolf - 狼人\hidden_wolf - 隐狼\painter - 画皮\white_wolf - 白狼王\n"
+                f"🎭 第三方阵营 (THIRD_PARTY)\n"
+                f"double_faced - 双面人\cupid - 丘比特"
             )
             return True, f"创建房间 {room_id}", True
         else:

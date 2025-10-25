@@ -352,7 +352,9 @@ class WerewolfGameManager:
             "started_time": None,
             "ended_time": None,
             "winner": None,
-            "game_code": None
+            "game_code": None,
+            "phase_start_time": time.time(),
+            "saved_players": set()  # 新增：被女巫解药拯救的玩家
         }
         
         # 自动加入房主
@@ -460,6 +462,7 @@ class WerewolfGameManager:
         game["phase"] = GamePhase.NIGHT.value
         game["day_count"] = 1  # 第一夜
         game["started_time"] = datetime.datetime.now().isoformat()
+        game["phase_start_time"] = time.time()
         self.last_activity[room_id] = time.time()
         self._save_game_file(room_id)
         return True
@@ -636,6 +639,7 @@ class GameLogicProcessor:
             
             if potential_deaths:
                 game["phase"] = GamePhase.WITCH_SAVE_PHASE.value
+                game["phase_start_time"] = time.time()
                 self.game_manager.last_activity[room_id] = time.time()
                 self.game_manager._save_game_file(room_id)
                 
@@ -643,7 +647,8 @@ class GameLogicProcessor:
                 candidates_text = "\n".join([f"{num}号 - {name}" for num, name in potential_deaths])
                 await self._send_private_message(game, witch_player["qq"],
                                                f"💊 解药就绪阶段！以下玩家可能会在今晚死亡：\n{candidates_text}\n\n"
-                                               f"请选择使用解药拯救其中一名玩家，或输入 /wwg skip 跳过使用解药")
+                                               f"请选择使用解药拯救其中一名玩家，或输入 /wwg skip 跳过使用解药\n"
+                                               f"⏰ 请在 {self._get_phase_timeout('witch_save')} 内完成选择")
                 return True
         
         # 如果没有女巫解药阶段，直接处理所有行动
@@ -679,14 +684,10 @@ class GameLogicProcessor:
                     elif game["witch_status"] == WitchStatus.HAS_SAVE_ONLY.value:
                         game["witch_status"] = WitchStatus.USED_BOTH.value
                     
-                    # 移除该玩家的死亡
+                    # 标记被拯救的玩家
                     target_player = self._get_player_by_number(game, target_num)
                     if target_player:
-                        # 从死亡队列中移除该玩家的狼刀死亡
-                        game["death_queue"] = [d for d in game["death_queue"] if not (
-                            d["reason"] == DeathReason.WOLF_KILL.value and 
-                            d["player_qq"] == target_player["qq"]
-                        )]
+                        game["saved_players"].add(target_player["qq"])
                     
                     await self._send_private_message(game, witch_player["qq"],
                                                    f"💊 你使用解药拯救了玩家 {target_num} 号")
@@ -797,10 +798,12 @@ class GameLogicProcessor:
         
         # 进入白天
         game["phase"] = GamePhase.DAY.value
+        game["phase_start_time"] = time.time()
         game["night_actions"] = {}
         game["witch_save_candidates"] = []
         game["witch_used_save_this_night"] = False
         game["witch_used_poison_this_night"] = False
+        game["saved_players"] = set()  # 清空拯救记录
         
         self.game_manager.last_activity[room_id] = time.time()
         self.game_manager._save_game_file(room_id)
@@ -891,6 +894,12 @@ class GameLogicProcessor:
                     await self._send_private_message(game, target_player["qq"],
                                                    "🐺 你被狼人袭击，现在加入狼人阵营！")
                 else:
+                    # 检查是否被女巫拯救
+                    if target_player["qq"] in game.get("saved_players", set()):
+                        await self._send_group_message(game, 
+                                                     f"💊 玩家 {target_num} 号被女巫拯救，狼人袭击失败！")
+                        return
+                    
                     # 加入死亡队列
                     game["death_queue"].append({
                         "player_qq": target_player["qq"],
@@ -1068,6 +1077,16 @@ class GameLogicProcessor:
         
         game = self.game_manager.games[room_id]
         
+        # 只统计存活玩家的投票
+        alive_players = [p for p in game["players"].values() if p["status"] == PlayerStatus.ALIVE.value]
+        total_alive = len(alive_players)
+        voted_players = len([voter_qq for voter_qq in game["votes"].keys() 
+                           if game["players"][voter_qq]["status"] == PlayerStatus.ALIVE.value])
+        
+        # 检查是否所有存活玩家都已完成投票
+        if voted_players < total_alive:
+            return False  # 还有玩家未投票
+        
         # 计算投票结果
         vote_count = {}
         for voter_qq, vote_number in game["votes"].items():
@@ -1112,6 +1131,7 @@ class GameLogicProcessor:
             if (player["status"] in [PlayerStatus.DEAD.value, PlayerStatus.EXILED.value] and 
                 player["role"] == "hunter" and player["death_reason"] != DeathReason.POISON.value):
                 game["phase"] = GamePhase.HUNTER_REVENGE.value
+                game["phase_start_time"] = time.time()
                 self.game_manager.last_activity[room_id] = time.time()
                 self.game_manager._save_game_file(room_id)
                 
@@ -1122,6 +1142,7 @@ class GameLogicProcessor:
         # 进入夜晚
         game["phase"] = GamePhase.NIGHT.value
         game["day_count"] += 1
+        game["phase_start_time"] = time.time()
         game["votes"] = {}
         game["night_actions"] = {}
         game["witch_save_candidates"] = []
@@ -1227,6 +1248,17 @@ class GameLogicProcessor:
         }
         return action_keys.get(role, "")
     
+    def _get_phase_timeout(self, phase: str) -> str:
+        """获取阶段超时时间描述"""
+        timeouts = {
+            "night": "5分钟",
+            "day": "5分钟", 
+            "vote": "3分钟",
+            "witch_save": "2分钟",
+            "hunter_revenge": "2分钟"
+        }
+        return timeouts.get(phase, "5分钟")
+    
     async def _send_private_message(self, game: Dict[str, Any], qq: str, message: str):
         """发送私聊消息 - 使用正确的API"""
         return await MessageSender.send_private_message(qq, message)
@@ -1238,9 +1270,9 @@ class GameLogicProcessor:
     async def _send_night_start_message(self, game: Dict[str, Any], room_id: str):
         """发送夜晚开始消息"""
         if game["day_count"] == 1:
-            message = f"🌙 第 {game['day_count']} 夜（首夜）开始！\n请有夜晚行动能力的玩家使用相应命令行动。\n\n行动顺序：\n1. 丘比特（仅首夜）\n2. 守卫\n3. 狼人\n4. 女巫\n5. 预言家\n6. 通灵师\n7. 魔术师\n8. 画皮（第二夜起）"
+            message = f"🌙 第 {game['day_count']} 夜（首夜）开始！\n请有夜晚行动能力的玩家使用相应命令行动。\n\n行动顺序：\n1. 丘比特（仅首夜）\n2. 守卫\n3. 狼人\n4. 女巫\n5. 预言家\n6. 通灵师\n7. 魔术师\n8. 画皮（第二夜起）\n\n⏰ 请在 {self._get_phase_timeout('night')} 内完成行动"
         else:
-            message = f"🌙 第 {game['day_count']} 夜开始！请有夜晚行动能力的玩家使用相应命令行动。"
+            message = f"🌙 第 {game['day_count']} 夜开始！请有夜晚行动能力的玩家使用相应命令行动。\n⏰ 请在 {self._get_phase_timeout('night')} 内完成行动"
         
         await self._send_group_message(game, message)
         
@@ -1260,9 +1292,9 @@ class GameLogicProcessor:
     async def _send_day_start_message(self, game: Dict[str, Any], room_id: str):
         """发送白天开始消息"""
         if game["day_count"] == 1:
-            message = f"☀️ 第 {game['day_count']} 天（首日）开始！\n请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。\n\n💡 提示：首日发言请谨慎，注意观察其他玩家的发言行为。"
+            message = f"☀️ 第 {game['day_count']} 天（首日）开始！\n请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。\n\n💡 提示：首日发言请谨慎，注意观察其他玩家的发言行为。\n⏰ 请在 {self._get_phase_timeout('day')} 内完成讨论和投票"
         else:
-            message = f"☀️ 第 {game['day_count']} 天开始！请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。"
+            message = f"☀️ 第 {game['day_count']} 天开始！请进行讨论和投票。\n使用 /wwg vote <玩家号码> 进行投票。\n⏰ 请在 {self._get_phase_timeout('day')} 内完成讨论和投票"
         
         await self._send_group_message(game, message)
     
@@ -1271,6 +1303,11 @@ class GameLogicProcessor:
         role = player["role"]
         role_info = ROLES[role]
         command = role_info["command"]
+        
+        # 计算已完成行动的玩家数量
+        acted_count = len([p for p in game["players"].values() 
+                          if p["has_acted"] and p["status"] == PlayerStatus.ALIVE.value])
+        total_players = len([p for p in game["players"].values() if p["status"] == PlayerStatus.ALIVE.value])
         
         message = f"🌙 第 {game['day_count']} 夜行动\n"
         message += f"你的身份：{role_info['name']}\n"
@@ -1311,6 +1348,7 @@ class GameLogicProcessor:
         elif role == "painter" and game["day_count"] >= 2:
             message += "🎨 从第二夜开始，你可以伪装成已出局玩家的身份\n\n"
         
+        message += f"📊 当前进度：{acted_count}/{total_players} 位玩家已完成行动\n\n"
         message += f"📝 使用命令：/wwg {command} <目标号码>\n"
         
         if role == "magician":
@@ -1475,7 +1513,7 @@ class WerewolfGameCommand(BaseCommand):
     async def _host_game(self):
         """创建房间并自动加入房主"""
         user_id = self.message.message_info.user_info.user_id
-        user_name = "玩家"  # 实际应该获取用户昵称
+        user_name = self._get_user_nickname(user_id)
         group_info = self.message.message_info.group_info
         
         if not group_info:
@@ -1493,7 +1531,7 @@ class WerewolfGameCommand(BaseCommand):
             await self.send_text(
                 f"🎮 狼人杀房间创建成功！\n"
                 f"📍 房间号: {room_id}\n"
-                f"👤 房主: {user_id} (已自动加入)\n"
+                f"👤 房主: {user_name} (已自动加入)\n"
                 f"🎯 当前玩家: 1/{game['settings']['player_count']}\n"
                 f"💡 使用 /wwg join {room_id} 加入游戏\n"
                 f"📊 使用 /wwg status 查看房间状态"
@@ -1511,7 +1549,7 @@ class WerewolfGameCommand(BaseCommand):
         
         room_id = args.strip()
         user_id = self.message.message_info.user_info.user_id
-        user_name = "玩家"  # 实际应该获取用户昵称
+        user_name = self._get_user_nickname(user_id)
         
         success = self.game_manager.join_game(room_id, str(user_id), user_name)
         
@@ -1542,7 +1580,7 @@ class WerewolfGameCommand(BaseCommand):
         
         # 构建状态信息
         status_text = f"📊 房间状态 - {room_id}\n"
-        status_text += f"👤 房主: {game['host']}\n"
+        status_text += f"👤 房主: {self._get_user_nickname(game['host'])}\n"
         status_text += f"🎯 玩家: {len(game['players'])}/{game['settings']['player_count']}\n"
         status_text += f"📝 游戏阶段: {self._get_phase_display_name(game['phase'])}\n\n"
         
@@ -1561,6 +1599,25 @@ class WerewolfGameCommand(BaseCommand):
         
         await self.send_text(status_text)
         return True, "显示房间状态", True
+    
+    def _get_user_nickname(self, user_id: str) -> str:
+        """获取用户昵称"""
+        try:
+            # 尝试从游戏管理器的玩家档案中获取
+            profile = self.game_manager.player_profiles.get(str(user_id))
+            if profile and profile.get("name"):
+                return profile["name"]
+            
+            # 如果档案中没有，尝试从消息中获取
+            if hasattr(self, 'message') and self.message:
+                user_info = self.message.message_info.user_info
+                if user_info and hasattr(user_info, 'nickname') and user_info.nickname:
+                    return user_info.nickname
+            
+            # 最后返回默认名称
+            return f"玩家{user_id}"
+        except:
+            return f"玩家{user_id}"
     
     def _get_phase_display_name(self, phase: str) -> str:
         """获取阶段显示名称"""
@@ -1704,7 +1761,8 @@ class WerewolfGameCommand(BaseCommand):
             await self._send_group_message(game, 
                 "🎮 游戏开始！\n"
                 "🌙 首夜降临，请有夜晚行动能力的玩家查看私聊消息获取角色信息并行动。\n"
-                "💡 行动顺序：丘比特 → 守卫 → 狼人 → 女巫 → 预言家 → 通灵师 → 魔术师"
+                "💡 行动顺序：丘比特 → 守卫 → 狼人 → 女巫 → 预言家 → 通灵师 → 魔术师\n"
+                "⏰ 请在 5分钟 内完成行动"
             )
             
             # 私聊发送详细的角色信息给所有玩家
@@ -1904,7 +1962,12 @@ class WerewolfGameCommand(BaseCommand):
                     self.game_manager.last_activity[room_id] = time.time()
                     self.game_manager._save_game_file(room_id)
                     
-                    await self.send_text(f"✅ 已记录毒药目标: {args}号")
+                    # 计算行动进度
+                    acted_count = len([p for p in game["players"].values() 
+                                      if p["has_acted"] and p["status"] == PlayerStatus.ALIVE.value])
+                    total_players = len([p for p in game["players"].values() if p["status"] == PlayerStatus.ALIVE.value])
+                    
+                    await self.send_text(f"✅ 已记录毒药目标: {args}号\n📊 当前进度: {acted_count}/{total_players} 位玩家已完成行动")
                     
                     # 检查是否需要进入女巫解药阶段
                     await self.game_processor.process_night_actions(room_id)
@@ -1957,7 +2020,12 @@ class WerewolfGameCommand(BaseCommand):
                 self.game_manager.last_activity[room_id] = time.time()
                 self.game_manager._save_game_file(room_id)
                 
-                await self.send_text(f"✅ 行动已记录: {action} {args}")
+                # 计算行动进度
+                acted_count = len([p for p in game["players"].values() 
+                                  if p["has_acted"] and p["status"] == PlayerStatus.ALIVE.value])
+                total_players = len([p for p in game["players"].values() if p["status"] == PlayerStatus.ALIVE.value])
+                
+                await self.send_text(f"✅ 行动已记录: {action} {args}\n📊 当前进度: {acted_count}/{total_players} 位玩家已完成行动")
                 
                 # 检查是否需要进入女巫解药阶段
                 await self.game_processor.process_night_actions(room_id)
@@ -2027,11 +2095,31 @@ class WerewolfGameCommand(BaseCommand):
                 await self.send_text("❌ 目标玩家不存在或已出局")
                 return False, "投票目标无效", True
             
-            game["votes"][player["qq"]] = vote_target
+            # 检查是否已经投过票
+            previous_vote = game["votes"].get(player["qq"])
+            if previous_vote:
+                # 更换投票目标
+                game["votes"][player["qq"]] = vote_target
+                await self.send_text(f"✅ 已更换投票目标为 {vote_target} 号玩家（原投票: {previous_vote} 号）")
+            else:
+                # 第一次投票
+                game["votes"][player["qq"]] = vote_target
+                await self.send_text(f"✅ 已投票给 {vote_target} 号玩家")
+            
+            # 计算投票进度
+            alive_players = [p for p in game["players"].values() if p["status"] == PlayerStatus.ALIVE.value]
+            total_alive = len(alive_players)
+            voted_players = len([voter_qq for voter_qq in game["votes"].keys() 
+                               if game["players"][voter_qq]["status"] == PlayerStatus.ALIVE.value])
+            
+            await self.send_text(f"📊 投票进度: {voted_players}/{total_alive} 位存活玩家已完成投票")
+            
             self.game_manager.last_activity[room_id] = time.time()
             self.game_manager._save_game_file(room_id)
             
-            await self.send_text(f"✅ 已投票给 {vote_target} 号玩家")
+            # 检查是否所有玩家都已完成投票
+            await self.game_processor.process_vote(room_id)
+            
             return True, f"投票给 {vote_target}", True
         except ValueError:
             await self.send_text("❌ 投票目标必须是数字")
@@ -2072,6 +2160,7 @@ class WerewolfGameCommand(BaseCommand):
             # 立即进入夜晚
             game["phase"] = GamePhase.NIGHT.value
             game["day_count"] += 1
+            game["phase_start_time"] = time.time()
             game["votes"] = {}
             game["night_actions"] = {}
             self.game_manager.last_activity[room_id] = time.time()
@@ -2113,6 +2202,7 @@ class WerewolfGameCommand(BaseCommand):
             # 进入夜晚
             game["phase"] = GamePhase.NIGHT.value
             game["day_count"] += 1
+            game["phase_start_time"] = time.time()
             game["votes"] = {}
             game["night_actions"] = {}
             self.game_manager.last_activity[room_id] = time.time()

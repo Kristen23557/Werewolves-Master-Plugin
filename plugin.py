@@ -291,7 +291,7 @@ class WerewolfGameManager:
         if qq not in self.player_profiles:
             self.player_profiles[qq] = {
                 "qq": qq,
-                "name": name,
+                "name": name,  # 使用传入的名称
                 "total_games": 0,
                 "wins": 0,
                 "losses": 0,
@@ -1413,6 +1413,8 @@ class WerewolfGameCommand(BaseCommand):
         "/wwg start - 开始游戏\n"
         "/wwg profile [QQ号] - 查看游戏档案\n"
         "/wwg archive <对局码> - 查询对局记录\n"
+        "/wwg name set <昵称> - 设置游戏昵称\n"  # 新增
+        "/wwg name view - 查看当前昵称\n"  # 新增
         "/wwg test_private <QQ号> [消息] - 测试私聊消息发送\n"
         "\n🎮 游戏内命令:\n"
         "/wwg check <号码> - 预言家查验\n"
@@ -1470,6 +1472,8 @@ class WerewolfGameCommand(BaseCommand):
                 return await self._show_archive(args)
             elif subcommand == "test_private":
                 return await self._handle_test_private(args)
+            elif subcommand == "name":  # 新增昵称设置命令
+                return await self._handle_name_command(args)
             else:
                 # 游戏内行动命令
                 return await self._handle_game_action(subcommand, args)
@@ -1633,6 +1637,63 @@ class WerewolfGameCommand(BaseCommand):
         await self.send_text(status_text)
         return True, "显示房间状态", True
     
+    async def _handle_name_command(self, args: str):
+        """处理昵称设置命令"""
+        if not args:
+            await self.send_text("❌ 请提供昵称操作，格式: /wwg name set <昵称> 或 /wwg name view")
+            return False, "缺少昵称操作", True
+        
+        parts = args.split(maxsplit=1)
+        operation = parts[0].lower()
+        
+        if operation == "set":
+            if len(parts) < 2:
+                await self.send_text("❌ 请提供要设置的昵称，格式: /wwg name set <昵称>")
+                return False, "缺少昵称", True
+            
+            nickname = parts[1].strip()
+            if len(nickname) > 20:
+                await self.send_text("❌ 昵称长度不能超过20个字符")
+                return False, "昵称过长", True
+            if len(nickname) < 1:
+                await self.send_text("❌ 昵称不能为空")
+                return False, "昵称为空", True
+            
+            return await self._set_nickname(nickname)
+        
+        elif operation == "view":
+            return await self._view_nickname()
+        
+        else:
+            await self.send_text("❌ 未知的昵称操作，可用操作: set, view")
+            return False, "未知昵称操作", True
+
+    async def _set_nickname(self, nickname: str):
+        """设置玩家昵称"""
+        user_id = str(self.message.message_info.user_info.user_id)
+        
+        # 获取或创建玩家档案
+        profile = self.game_manager.get_or_create_profile(user_id, nickname)
+        
+        # 更新昵称
+        profile["name"] = nickname
+        self.game_manager._save_profile(user_id)
+        
+        await self.send_text(f"✅ 昵称设置成功！\n你的新昵称: {nickname}")
+        return True, f"设置昵称: {nickname}", True
+
+    async def _view_nickname(self):
+        """查看当前昵称"""
+        user_id = str(self.message.message_info.user_info.user_id)
+        profile = self.game_manager.player_profiles.get(user_id)
+        
+        if profile and profile.get("name"):
+            await self.send_text(f"📝 你的当前昵称: {profile['name']}")
+            return True, "查看昵称", True
+        else:
+            await self.send_text("❌ 你还没有设置昵称，使用 /wwg name set <昵称> 来设置")
+            return False, "未设置昵称", True
+
     def _has_unfinished_game(self, user_id: str) -> bool:
         """检查玩家是否有未完成的游戏"""
         for room_id, game in self.game_manager.games.items():
@@ -1641,44 +1702,16 @@ class WerewolfGameCommand(BaseCommand):
         return False
 
     def _get_user_nickname(self, user_id: str) -> str:
-        """获取用户昵称"""
+        """获取用户昵称 - 从玩家档案中获取"""
         try:
-            # 使用person_api获取用户昵称（同步方式）
-            person_id = person_api.get_person_id("qq", int(user_id))
-            
-            # 由于get_person_value是异步的，我们需要在同步上下文中运行它
-            # 这里创建一个简单的事件循环来运行异步函数
-            import asyncio
-            try:
-                # 尝试获取现有的事件循环
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                # 如果没有事件循环，创建一个新的
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # 在事件循环中运行异步函数
-            nickname = loop.run_until_complete(
-                person_api.get_person_value(person_id, "nickname")
-            )
-            
-            if nickname:
-                return nickname
-            
-            # 如果person_api获取失败，回退到游戏档案中的名称
             profile = self.game_manager.player_profiles.get(str(user_id))
             if profile and profile.get("name"):
                 return profile["name"]
             
-            # 最后返回默认名称
-            return f"玩家{user_id}"
-        except Exception as e:
-            print(f"获取用户昵称失败 {user_id}: {e}")
-            # 如果出现异常，使用档案中的名称或默认名称
-            profile = self.game_manager.player_profiles.get(str(user_id))
-            if profile and profile.get("name"):
-                return profile["name"]
-            return f"玩家{user_id}"
+            # 如果没有设置昵称，显示QQ号前五位
+            return f"玩家{user_id[:5]}"
+        except:
+            return f"玩家{user_id[:5]}"
     
     def _get_qq_nickname(self, qq_number: str) -> str:
         """通过QQ号获取用户昵称"""

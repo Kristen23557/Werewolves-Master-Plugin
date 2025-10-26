@@ -1626,7 +1626,7 @@ class WerewolfGameCommand(BaseCommand):
             role_display = "???" if game["phase"] in [GamePhase.SETUP.value, GamePhase.NIGHT.value, GamePhase.DAY.value] else ROLES[player["original_role"]]["name"]
             # 使用QQ号获取昵称
             player_nickname = self._get_qq_nickname(player['qq'])
-            status_text += f"  {player['number']}号 - {player_nickname} {status_icon} ({role_display})\n"
+            status_text += f"  {player['number']}号 - {player_nickname} {status_icon}\n"
         
         status_text += "\n🎭 角色设置:\n"
         for role_id, count in game["settings"]["roles"].items():

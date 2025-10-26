@@ -1619,13 +1619,13 @@ class WerewolfGameCommand(BaseCommand):
         status_text += f"🎯 玩家: {len(game['players'])}/{game['settings']['player_count']}\n"
         status_text += f"📝 游戏阶段: {self._get_phase_display_name(game['phase'])}\n\n"
         
-        # 玩家列表
+        # 玩家列表 - 修复：使用档案中的昵称而不是QQ号前五位
         status_text += "👥 当前玩家:\n"
         for player in game["players"].values():
             status_icon = "💚" if player["status"] == PlayerStatus.ALIVE.value else "💀"
             role_display = "???" if game["phase"] in [GamePhase.SETUP.value, GamePhase.NIGHT.value, GamePhase.DAY.value] else ROLES[player["original_role"]]["name"]
-            # 使用QQ号获取昵称
-            player_nickname = self._get_qq_nickname(player['qq'])
+            # 使用玩家档案中的昵称
+            player_nickname = player['name']
             status_text += f"  {player['number']}号 - {player_nickname} {status_icon}\n"
         
         status_text += "\n🎭 角色设置:\n"
@@ -1813,6 +1813,11 @@ class WerewolfGameCommand(BaseCommand):
         if game["host"] != str(user_id):
             await self.send_text("❌ 只有房主可以修改设置")
             return False, "非房主修改设置", True
+        
+        # 修复：允许在准备阶段使用设置命令
+        if game["phase"] != GamePhase.SETUP.value:
+            await self.send_text(f"❌ 当前阶段不能执行此命令（当前阶段: {self._get_phase_display_name(game['phase'])}）")
+            return False, "错误阶段设置", True
         
         if setting_type == "players":
             if len(parts) < 2:
